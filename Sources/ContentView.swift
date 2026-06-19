@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: SSHConnectionStore
     @EnvironmentObject private var preferences: AppPreferencesStore
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedID: SSHConnection.ID?
     @State private var errorMessage = ""
 
@@ -27,7 +28,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             ZStack {
                 Rectangle()
                     .fill(.regularMaterial)
@@ -45,6 +46,16 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
 
                                 Spacer(minLength: 8)
+
+                                if preferences.connectionSortMode == .manual {
+                                    Button {
+                                        _ = store.addSeparator()
+                                    } label: {
+                                        Image(systemName: "line.3.horizontal")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help(t("新增分割线", "Add Divider"))
+                                }
 
                                 Menu {
                                     Button(t("手动", "Manual")) {
@@ -124,16 +135,6 @@ struct ContentView: View {
                         selectedID = store.addConnection()
                     } label: {
                         Label(t("新增", "Add"), systemImage: "plus")
-                    }
-                }
-
-                ToolbarItem {
-                    if preferences.connectionSortMode == .manual {
-                        Button {
-                            selectedID = store.addSeparator()
-                        } label: {
-                            Label(t("新增分割线", "Add Divider"), systemImage: "line.3.horizontal")
-                        }
                     }
                 }
             }
