@@ -13,43 +13,87 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            Group {
-                if store.connections.isEmpty {
-                    sidebarEmptyState
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.regularMaterial)
-                } else {
-                    List(selection: $selectedID) {
-                        ForEach(store.connections) { connection in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                                    .font(.headline)
-                                    .lineLimit(1)
+            ZStack {
+                Rectangle()
+                    .fill(.regularMaterial)
+                    .ignoresSafeArea()
 
-                                Text(connection.host)
+                Group {
+                    if store.connections.isEmpty {
+                        sidebarEmptyState
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Label(t("排序", "Sort"), systemImage: "arrow.up.arrow.down")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
 
-                                if let latest = connection.latestSystemInfo,
-                                   !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text(latest.kernelVersion)
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                        .lineLimit(1)
+                                Spacer(minLength: 8)
+
+                                Menu {
+                                    Button(t("手动", "Manual")) {
+                                        preferences.setConnectionSortMode(.manual)
+                                    }
+                                    Button(t("名称", "Name")) {
+                                        preferences.setConnectionSortMode(.name)
+                                    }
+                                    Button("IP") {
+                                        preferences.setConnectionSortMode(.ip)
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Text(sortModeLabel)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption2)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color.primary.opacity(0.06))
+                                    )
                                 }
+                                .menuStyle(.borderlessButton)
                             }
-                            .padding(.vertical, 4)
-                            .tag(connection.id)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+
+                            List(selection: $selectedID) {
+                                ForEach(sortedConnections) { connection in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
+                                            .font(.headline)
+                                            .lineLimit(1)
+
+                                        Text(connection.host)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+
+                                        if let latest = connection.latestSystemInfo,
+                                           !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                            Text(latest.kernelVersion)
+                                                .font(.caption)
+                                                .foregroundStyle(.tertiary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                    .tag(connection.id)
+                                }
+                                .onDelete(perform: deleteConnections)
+                                .onMove(perform: preferences.connectionSortMode == .manual ? moveConnections : nil)
+                            }
+                            .listStyle(.sidebar)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
                         }
-                        .onDelete(perform: deleteConnections)
                     }
-                    .listStyle(.sidebar)
-                    .scrollContentBackground(.hidden)
-                    .background(.regularMaterial)
                 }
             }
             .navigationTitle(t("SSH 记录", "SSH Records"))
+            .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 320)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -126,14 +170,70 @@ struct ContentView: View {
         return store.connections.first(where: { $0.id == selectedID })
     }
 
+    private var sortedConnections: [SSHConnection] {
+        switch preferences.connectionSortMode {
+        case .manual:
+            return store.connections.sorted {
+                if $0.manualOrder == $1.manualOrder {
+                    return $0.createdAt < $1.createdAt
+                }
+                return $0.manualOrder < $1.manualOrder
+            }
+        case .name:
+            return store.connections.sorted {
+                let left = $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let right = $1.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return left.localizedStandardCompare(right) == .orderedAscending
+            }
+        case .ip:
+            return store.connections.sorted { compareHosts($0.host, $1.host) }
+        }
+    }
+
+    private var sortModeLabel: String {
+        switch preferences.connectionSortMode {
+        case .manual:
+            return t("手动", "Manual")
+        case .name:
+            return t("名称", "Name")
+        case .ip:
+            return "IP"
+        }
+    }
+
     private func deleteConnections(at offsets: IndexSet) {
         let ids = offsets.compactMap { index in
-            store.connections.indices.contains(index) ? store.connections[index].id : nil
+            sortedConnections.indices.contains(index) ? sortedConnections[index].id : nil
         }
-        store.delete(at: offsets)
+        store.connections.removeAll { ids.contains($0.id) }
         if let selectedID, ids.contains(selectedID) {
             self.selectedID = store.connections.first?.id
         }
+    }
+
+    private func moveConnections(from source: IndexSet, to destination: Int) {
+        guard preferences.connectionSortMode == .manual else { return }
+        store.moveManually(from: source, to: destination)
+    }
+
+    private func compareHosts(_ lhs: String, _ rhs: String) -> Bool {
+        let leftIP = ipv4Components(lhs)
+        let rightIP = ipv4Components(rhs)
+
+        if let leftIP, let rightIP {
+            return leftIP.lexicographicallyPrecedes(rightIP)
+        }
+        if leftIP != nil { return true }
+        if rightIP != nil { return false }
+        return lhs.localizedStandardCompare(rhs) == .orderedAscending
+    }
+
+    private func ipv4Components(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".")
+        guard parts.count == 4 else { return nil }
+        let values = parts.compactMap { Int($0) }
+        guard values.count == 4, values.allSatisfy({ (0...255).contains($0) }) else { return nil }
+        return values
     }
 
     private func openConnection(_ connection: SSHConnection) {
@@ -276,7 +376,7 @@ struct ConnectionDetailView: View {
                             }
                         }
                     }
-                    .frame(minWidth: 430)
+                    .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
 
                     VStack(alignment: .leading, spacing: 16) {
                         detailCard(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
@@ -318,7 +418,7 @@ struct ConnectionDetailView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
-                    .frame(minWidth: 390, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(minWidth: 280, idealWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
             .padding(20)

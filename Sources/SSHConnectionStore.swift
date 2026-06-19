@@ -49,14 +49,18 @@ final class SSHConnectionStore: ObservableObject {
                             kernelVersion: "Linux 6.8.0-31-generic",
                             updateInfo: "2026-06-10 apt upgrade"
                         )
-                    ]
+                    ],
+                    manualOrder: 0
                 )
             ]
+        } else {
+            normalizeManualOrder()
         }
     }
 
     func addConnection() -> SSHConnection.ID {
-        let connection = SSHConnection(name: "New Connection")
+        let nextOrder = (connections.map(\ .manualOrder).max() ?? -1) + 1
+        let connection = SSHConnection(name: "New Connection", manualOrder: nextOrder)
         connections.insert(connection, at: 0)
         return connection.id
     }
@@ -90,6 +94,39 @@ final class SSHConnectionStore: ObservableObject {
 
     func clearAll() {
         connections = []
+    }
+
+    func moveManually(from source: IndexSet, to destination: Int) {
+        var manuallySorted = connections.sorted {
+            if $0.manualOrder == $1.manualOrder {
+                return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
+            return $0.manualOrder < $1.manualOrder
+        }
+        manuallySorted.move(fromOffsets: source, toOffset: destination)
+        for index in manuallySorted.indices {
+            manuallySorted[index].manualOrder = index
+        }
+        connections = manuallySorted
+    }
+
+    private func normalizeManualOrder() {
+        let normalized = connections
+            .sorted {
+                if $0.manualOrder == $1.manualOrder {
+                    return $0.createdAt < $1.createdAt
+                }
+                return $0.manualOrder < $1.manualOrder
+            }
+            .enumerated()
+            .map { index, connection in
+                var updated = connection
+                updated.manualOrder = index
+                return updated
+            }
+        if normalized != connections {
+            connections = normalized
+        }
     }
 
     private func load() {

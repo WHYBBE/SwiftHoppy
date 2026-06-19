@@ -28,6 +28,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var notes: String
     var systemInfoHistory: [SystemInfoSnapshot]
     var preferredAppPath: String
+    var manualOrder: Int
     var createdAt: Date
     var updatedAt: Date
 
@@ -40,6 +41,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case notes
         case systemInfoHistory
         case preferredAppPath
+        case manualOrder
         case createdAt
         case updatedAt
         case kernelVersion
@@ -55,6 +57,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         notes: String = "",
         systemInfoHistory: [SystemInfoSnapshot] = [],
         preferredAppPath: String = "",
+        manualOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -66,6 +69,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.notes = notes
         self.systemInfoHistory = systemInfoHistory
         self.preferredAppPath = preferredAppPath
+        self.manualOrder = manualOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -79,6 +83,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         username = try container.decode(String.self, forKey: .username)
         notes = try container.decode(String.self, forKey: .notes)
         preferredAppPath = try container.decode(String.self, forKey: .preferredAppPath)
+        manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
 
@@ -111,6 +116,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(notes, forKey: .notes)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
+        try container.encode(manualOrder, forKey: .manualOrder)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
     }

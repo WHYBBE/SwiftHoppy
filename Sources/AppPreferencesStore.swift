@@ -24,6 +24,14 @@ enum AppTheme: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ConnectionSortMode: String, Codable, CaseIterable, Identifiable {
+    case manual
+    case name
+    case ip
+
+    var id: String { rawValue }
+}
+
 struct InstalledTerminalApp: Identifiable, Hashable, Codable {
     let path: String
     let name: String
@@ -36,6 +44,7 @@ struct TerminalAppCache: Codable {
     var lastScannedAt: Date?
     var language: AppLanguage
     var theme: AppTheme
+    var connectionSortMode: ConnectionSortMode
 }
 
 @MainActor
@@ -46,6 +55,9 @@ final class AppPreferencesStore: ObservableObject {
         didSet { save() }
     }
     @Published var theme: AppTheme = .system {
+        didSet { save() }
+    }
+    @Published var connectionSortMode: ConnectionSortMode = .manual {
         didSet { save() }
     }
 
@@ -87,6 +99,10 @@ final class AppPreferencesStore: ObservableObject {
         }
     }
 
+    func setConnectionSortMode(_ mode: ConnectionSortMode) {
+        connectionSortMode = mode
+    }
+
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
@@ -96,11 +112,13 @@ final class AppPreferencesStore: ObservableObject {
             lastScannedAt = cache.lastScannedAt
             language = cache.language
             theme = cache.theme
+            connectionSortMode = cache.connectionSortMode
         } catch {
             installedApps = []
             lastScannedAt = nil
             language = .chinese
             theme = .system
+            connectionSortMode = .manual
         }
     }
 
@@ -110,7 +128,8 @@ final class AppPreferencesStore: ObservableObject {
                 apps: installedApps,
                 lastScannedAt: lastScannedAt,
                 language: language,
-                theme: theme
+                theme: theme,
+                connectionSortMode: connectionSortMode
             )
             let data = try encoder.encode(cache)
             try data.write(to: fileURL, options: .atomic)
