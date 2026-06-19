@@ -37,28 +37,32 @@ enum RemoteSystemInfoService {
         }
 
         let remoteCommand = #"""
-        uname -srmo 2>/dev/null
+        printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
         if command -v apt >/dev/null 2>&1; then
-            stat -c '%y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%y' /var/lib/apt/lists 2>/dev/null | head -n 1
+            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%y' /var/lib/apt/lists 2>/dev/null | head -n 1)"
         elif command -v dnf >/dev/null 2>&1; then
-            stat -c '%y' /var/cache/dnf 2>/dev/null
+            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/dnf 2>/dev/null)"
         elif command -v yum >/dev/null 2>&1; then
-            stat -c '%y' /var/cache/yum 2>/dev/null
+            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/yum 2>/dev/null)"
         elif command -v zypper >/dev/null 2>&1; then
-            stat -c '%y' /var/cache/zypp 2>/dev/null
+            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/zypp 2>/dev/null)"
         elif [ -f /var/log/pacman.log ]; then
-            tail -n 1 /var/log/pacman.log 2>/dev/null
+            printf 'UPDATE=%s\n' "$(tail -n 1 /var/log/pacman.log 2>/dev/null)"
+        elif command -v apk >/dev/null 2>&1; then
+            printf 'UPDATE=%s\n' "$(stat -c '%y' /lib/apk/db/installed 2>/dev/null || stat -c '%y' /var/lib/apk/db/installed 2>/dev/null)"
         elif command -v pkg >/dev/null 2>&1; then
-            stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null
+            printf 'UPDATE=%s\n' "$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
         elif command -v sw_vers >/dev/null 2>&1; then
-            sw_vers 2>/dev/null | tr '\n' ' '
+            printf 'UPDATE=%s\n' "$(sw_vers 2>/dev/null | tr '\n' ' ')"
+        else
+            printf 'UPDATE=\n'
         fi
         if [ -r /proc/uptime ]; then
-            awk '{print int($1)}' /proc/uptime 2>/dev/null
+            printf 'UPTIME=%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
         elif uptime -p >/dev/null 2>&1; then
-            uptime -p 2>/dev/null
+            printf 'UPTIME=%s\n' "$(uptime -p 2>/dev/null)"
         else
-            uptime 2>/dev/null
+            printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
         fi
         """#
 
@@ -91,9 +95,16 @@ enum RemoteSystemInfoService {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let kernelVersion = lines.first ?? "Unknown"
-        let updateInfo = lines.dropFirst().first ?? "未检测到更新信息"
-        let uptimeInfo = formatUptime(lines.dropFirst(2).first ?? "")
+        let values = Dictionary(uniqueKeysWithValues: lines.compactMap { line -> (String, String)? in
+            guard let separatorIndex = line.firstIndex(of: "=") else { return nil }
+            let key = String(line[..<separatorIndex])
+            let value = String(line[line.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (key, value)
+        })
+
+        let kernelVersion = values["KERNEL", default: "Unknown"]
+        let updateInfo = values["UPDATE", default: ""].isEmpty ? "未检测到更新信息" : values["UPDATE", default: ""]
+        let uptimeInfo = formatUptime(values["UPTIME", default: ""])
         return RemoteSystemInfo(kernelVersion: kernelVersion, updateInfo: updateInfo, uptimeInfo: uptimeInfo, recordedAt: .now)
     }
 
