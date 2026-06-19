@@ -136,94 +136,137 @@ struct ConnectionDetailView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Connection") {
-                TextField("Name", text: $draft.name)
-                TextField("Host", text: $draft.host)
-                TextField("Username", text: $draft.username)
-                Stepper(value: $draft.port, in: 1...65535) {
-                    Text("Port: \(draft.port)")
+        HStack(alignment: .top, spacing: 20) {
+            Form {
+                Section("Connection") {
+                    TextField("Name", text: $draft.name)
+                    TextField("Host", text: $draft.host)
+                    TextField("Username", text: $draft.username)
+                    Stepper(value: $draft.port, in: 1...65535) {
+                        Text("Port: \(draft.port)")
+                    }
+                }
+
+                Section("Open With") {
+                    Picker("Installed Apps", selection: $draft.preferredAppPath) {
+                        Text("System Default").tag("")
+                        ForEach(installedApps) { app in
+                            Text(app.name).tag(app.path)
+                        }
+                    }
+
+                    if !draft.preferredAppPath.isEmpty {
+                        Text(draft.preferredAppPath)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    HStack {
+                        Button("Choose Application") {
+                            chooseApplication()
+                        }
+
+                        if !draft.preferredAppPath.isEmpty {
+                            Button("Clear") {
+                                draft.preferredAppPath = ""
+                            }
+                        }
+                    }
+
+                    Text("默认使用系统应用。可在设置中检测并缓存已安装终端，或手动选择任意 .app。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Notes") {
+                    TextEditor(text: $draft.notes)
+                        .frame(minHeight: 220)
+                }
+
+                Section {
+                    HStack {
+                        Button("Save") {
+                            onSave(draft)
+                        }
+                        .keyboardShortcut("s", modifiers: [.command])
+
+                        Button("Open SSH") {
+                            onOpen(draft)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Delete", role: .destructive) {
+                            onDelete()
+                        }
+
+                        Spacer()
+
+                        if let url = draft.sshURL {
+                            Text(url.absoluteString)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
+            .frame(minWidth: 420)
 
-            Section("Linux / Unix") {
-                TextField("Kernel Version", text: $draft.kernelVersion)
-                TextField("Last Update Info", text: $draft.lastUpdateInfo)
-
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
+                    Text("System History")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
                     Button(isFetchingSystemInfo ? "Reading via SSH..." : "Read via SSH") {
                         refreshRemoteSystemInfo()
                     }
                     .disabled(isFetchingSystemInfo)
 
-                    Text("通过系统 ssh 自动读取内核版本和最近更新信息。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Open With") {
-                Picker("Installed Apps", selection: $draft.preferredAppPath) {
-                    Text("System Default").tag("")
-                    ForEach(installedApps) { app in
-                        Text(app.name).tag(app.path)
+                    Button("Add Manual Entry") {
+                        draft.systemInfoHistory.insert(SystemInfoSnapshot(), at: 0)
                     }
                 }
 
-                if !draft.preferredAppPath.isEmpty {
-                    Text(draft.preferredAppPath)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-
-                HStack {
-                    Button("Choose Application") {
-                        chooseApplication()
-                    }
-
-                    if !draft.preferredAppPath.isEmpty {
-                        Button("Clear") {
-                            draft.preferredAppPath = ""
-                        }
-                    }
-                }
-
-                Text("默认使用系统应用。可在设置中检测并缓存已安装终端，或手动选择任意 .app。")
+                Text("每次 SSH 读取都会追加一条历史，也可手动补录。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
 
-            Section("Notes") {
-                TextEditor(text: $draft.notes)
-                    .frame(minHeight: 140)
-            }
-
-            Section {
-                HStack {
-                    Button("Save") {
-                        onSave(draft)
-                    }
-                    .keyboardShortcut("s", modifiers: [.command])
-
-                    Button("Open SSH") {
-                        onOpen(draft)
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button("Delete", role: .destructive) {
-                        onDelete()
-                    }
-
-                    Spacer()
-
-                    if let url = draft.sshURL {
-                        Text(url.absoluteString)
-                            .font(.footnote)
+                if draft.systemInfoHistory.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                        Text("暂无系统信息历史。")
                             .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach($draft.systemInfoHistory) { $snapshot in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(snapshot.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Button("Delete") {
+                                        deleteSnapshot(id: snapshot.id)
+                                    }
+                                    .buttonStyle(.link)
+                                }
+
+                                TextField("Kernel Version", text: $snapshot.kernelVersion)
+                                TextField("Last Update Info", text: $snapshot.updateInfo)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .listStyle(.inset)
                 }
             }
+            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding()
         .navigationTitle(draft.displayName)
@@ -268,8 +311,14 @@ struct ConnectionDetailView: View {
             do {
                 let info = try await RemoteSystemInfoService.fetch(for: snapshot)
                 await MainActor.run {
-                    draft.kernelVersion = info.kernelVersion
-                    draft.lastUpdateInfo = info.lastUpdateInfo
+                    draft.systemInfoHistory.insert(
+                        SystemInfoSnapshot(
+                            kernelVersion: info.kernelVersion,
+                            updateInfo: info.updateInfo,
+                            recordedAt: info.recordedAt
+                        ),
+                        at: 0
+                    )
                     isFetchingSystemInfo = false
                 }
             } catch {
@@ -279,6 +328,10 @@ struct ConnectionDetailView: View {
                 }
             }
         }
+    }
+
+    private func deleteSnapshot(id: SystemInfoSnapshot.ID) {
+        draft.systemInfoHistory.removeAll { $0.id == id }
     }
 }
 

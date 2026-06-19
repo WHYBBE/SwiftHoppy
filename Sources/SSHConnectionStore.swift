@@ -33,8 +33,12 @@ final class SSHConnectionStore: ObservableObject {
                     host: "192.168.1.10",
                     username: "root",
                     notes: "示例记录，可直接修改或删除。",
-                    kernelVersion: "Linux 6.8.0-31-generic",
-                    lastUpdateInfo: "2026-06-10 apt upgrade"
+                    systemInfoHistory: [
+                        SystemInfoSnapshot(
+                            kernelVersion: "Linux 6.8.0-31-generic",
+                            updateInfo: "2026-06-10 apt upgrade"
+                        )
+                    ]
                 )
             ]
         }

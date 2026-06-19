@@ -2,7 +2,8 @@ import Foundation
 
 struct RemoteSystemInfo {
     let kernelVersion: String
-    let lastUpdateInfo: String
+    let updateInfo: String
+    let recordedAt: Date
 }
 
 enum RemoteSystemInfoError: LocalizedError {
@@ -83,8 +84,8 @@ enum RemoteSystemInfoService {
             .filter { !$0.isEmpty }
 
         let kernelVersion = lines.first ?? "Unknown"
-        let lastUpdateInfo = lines.dropFirst().first ?? "未检测到更新信息"
-        return RemoteSystemInfo(kernelVersion: kernelVersion, lastUpdateInfo: lastUpdateInfo)
+        let updateInfo = lines.dropFirst().first ?? "未检测到更新信息"
+        return RemoteSystemInfo(kernelVersion: kernelVersion, updateInfo: updateInfo, recordedAt: .now)
     }
 
     private static func sshArguments(for connection: SSHConnection) -> [String] {
