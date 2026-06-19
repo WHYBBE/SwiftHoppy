@@ -214,9 +214,16 @@ struct ConnectionDetailView: View {
                                         TextField(t("用户名", "Username"), text: $draft.username)
                                     }
                                     modernField(title: t("端口", "Port")) {
-                                        Stepper(value: $draft.port, in: 1...65535) {
-                                            Text("\(draft.port)")
-                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        HStack(spacing: 10) {
+                                            TextField(
+                                                t("端口", "Port"),
+                                                value: $draft.port,
+                                                format: .number
+                                            )
+                                            .textFieldStyle(.plain)
+
+                                            Stepper("", value: $draft.port, in: 1...65535)
+                                                .labelsHidden()
                                         }
                                     }
                                 }
