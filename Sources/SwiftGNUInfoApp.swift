@@ -23,12 +23,25 @@ struct SwiftGNUInfoApp: App {
                 .environmentObject(store)
                 .environmentObject(preferences)
                 .frame(minWidth: 980, minHeight: 620)
+                .preferredColorScheme(colorScheme)
         }
         .windowResizability(.contentMinSize)
 
         Settings {
             SettingsView()
                 .environmentObject(preferences)
+                .preferredColorScheme(colorScheme)
+        }
+    }
+
+    private var colorScheme: ColorScheme? {
+        switch preferences.theme {
+        case .system:
+            return nil
+        case .light:
+            return .light
+        case .dark:
+            return .dark
         }
     }
 }

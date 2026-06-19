@@ -7,6 +7,10 @@ struct ContentView: View {
     @State private var selectedID: SSHConnection.ID?
     @State private var errorMessage = ""
 
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedID) {
@@ -22,13 +26,13 @@ struct ContentView: View {
                 }
                 .onDelete(perform: deleteConnections)
             }
-            .navigationTitle("SSH Records")
+            .navigationTitle(t("SSH 记录", "SSH Records"))
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         selectedID = store.addConnection()
                     } label: {
-                        Label("Add", systemImage: "plus")
+                        Label(t("新增", "Add"), systemImage: "plus")
                     }
                 }
             }
@@ -55,9 +59,9 @@ struct ContentView: View {
                     Image(systemName: "server.rack")
                         .font(.system(size: 42))
                         .foregroundStyle(.secondary)
-                    Text("No Selection")
+                    Text(t("未选择记录", "No Selection"))
                         .font(.title3)
-                    Text("请选择或新建一条 SSH 记录。")
+                    Text(t("请选择或新建一条 SSH 记录。", "Select or create an SSH record."))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,7 +91,7 @@ struct ContentView: View {
 
     private func openConnection(_ connection: SSHConnection) {
         guard let url = connection.sshURL else {
-            errorMessage = "SSH 地址无效，请检查主机、端口和用户名。"
+            errorMessage = t("SSH 地址无效，请检查主机、端口和用户名。", "Invalid SSH address. Check host, port, and username.")
             return
         }
 
@@ -100,13 +104,14 @@ struct ContentView: View {
         let configuration = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: appPath), configuration: configuration) { _, error in
             if let error {
-                errorMessage = "打开 SSH 连接失败：\(error.localizedDescription)"
+                errorMessage = "\(t("打开 SSH 连接失败", "Failed to open SSH connection"))：\(error.localizedDescription)"
             }
         }
     }
 }
 
 struct ConnectionDetailView: View {
+    @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
     @State private var fetchErrorMessage = ""
@@ -135,21 +140,25 @@ struct ConnectionDetailView: View {
         self.onDismissError = onDismissError
     }
 
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             Form {
-                Section("Connection") {
-                    TextField("Name", text: $draft.name)
-                    TextField("Host", text: $draft.host)
-                    TextField("Username", text: $draft.username)
+                Section(t("连接信息", "Connection")) {
+                    TextField(t("名称", "Name"), text: $draft.name)
+                    TextField(t("主机", "Host"), text: $draft.host)
+                    TextField(t("用户名", "Username"), text: $draft.username)
                     Stepper(value: $draft.port, in: 1...65535) {
-                        Text("Port: \(draft.port)")
+                        Text("\(t("端口", "Port")): \(draft.port)")
                     }
                 }
 
-                Section("Open With") {
-                    Picker("Installed Apps", selection: $draft.preferredAppPath) {
-                        Text("System Default").tag("")
+                Section(t("打开方式", "Open With")) {
+                    Picker(t("已安装应用", "Installed Apps"), selection: $draft.preferredAppPath) {
+                        Text(t("系统默认", "System Default")).tag("")
                         ForEach(installedApps) { app in
                             Text(app.name).tag(app.path)
                         }
@@ -163,40 +172,40 @@ struct ConnectionDetailView: View {
                     }
 
                     HStack {
-                        Button("Choose Application") {
+                        Button(t("选择应用", "Choose Application")) {
                             chooseApplication()
                         }
 
                         if !draft.preferredAppPath.isEmpty {
-                            Button("Clear") {
+                            Button(t("清除", "Clear")) {
                                 draft.preferredAppPath = ""
                             }
                         }
                     }
 
-                    Text("默认使用系统应用。可在设置中检测并缓存已安装终端，或手动选择任意 .app。")
+                    Text(t("默认使用系统应用。可在设置中检测并缓存已安装终端，或手动选择任意 .app。", "Uses the system app by default. You can detect installed terminal apps in Settings or choose any .app manually."))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Notes") {
+                Section(t("备注", "Notes")) {
                     TextEditor(text: $draft.notes)
                         .frame(minHeight: 220)
                 }
 
                 Section {
                     HStack {
-                        Button("Save") {
+                        Button(t("保存", "Save")) {
                             onSave(draft)
                         }
                         .keyboardShortcut("s", modifiers: [.command])
 
-                        Button("Open SSH") {
+                        Button(t("打开 SSH", "Open SSH")) {
                             onOpen(draft)
                         }
                         .buttonStyle(.borderedProminent)
 
-                        Button("Delete", role: .destructive) {
+                        Button(t("删除", "Delete"), role: .destructive) {
                             onDelete()
                         }
 
@@ -214,23 +223,23 @@ struct ConnectionDetailView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("System History")
+                    Text(t("系统历史", "System History"))
                         .font(.title3)
                         .fontWeight(.semibold)
 
                     Spacer()
 
-                    Button(isFetchingSystemInfo ? "Reading via SSH..." : "Read via SSH") {
+                    Button(isFetchingSystemInfo ? t("正在通过 SSH 读取...", "Reading via SSH...") : t("通过 SSH 读取", "Read via SSH")) {
                         refreshRemoteSystemInfo()
                     }
                     .disabled(isFetchingSystemInfo)
 
-                    Button("Add Manual Entry") {
+                    Button(t("手动新增", "Add Manual Entry")) {
                         draft.systemInfoHistory.insert(SystemInfoSnapshot(), at: 0)
                     }
                 }
 
-                Text("每次 SSH 读取都会追加一条历史，也可手动补录。")
+                Text(t("每次 SSH 读取都会追加一条历史，也可手动补录。", "Each SSH read adds a history item, and you can also add entries manually."))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -239,7 +248,7 @@ struct ConnectionDetailView: View {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 28))
                             .foregroundStyle(.secondary)
-                        Text("暂无系统信息历史。")
+                        Text(t("暂无系统信息历史。", "No system history yet."))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -251,14 +260,14 @@ struct ConnectionDetailView: View {
                                     Text(snapshot.recordedAt.formatted(date: .abbreviated, time: .shortened))
                                         .font(.subheadline)
                                     Spacer()
-                                    Button("Delete") {
+                                    Button(t("删除", "Delete")) {
                                         deleteSnapshot(id: snapshot.id)
                                     }
                                     .buttonStyle(.link)
                                 }
 
-                                TextField("Kernel Version", text: $snapshot.kernelVersion)
-                                TextField("Last Update Info", text: $snapshot.updateInfo)
+                                TextField(t("内核版本", "Kernel Version"), text: $snapshot.kernelVersion)
+                                TextField(t("最后更新信息", "Last Update Info"), text: $snapshot.updateInfo)
                             }
                             .padding(.vertical, 6)
                         }
@@ -273,7 +282,7 @@ struct ConnectionDetailView: View {
         .onChange(of: draft) { newValue in
             onSave(newValue)
         }
-        .alert("操作失败", isPresented: Binding(
+        .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: { !errorMessage.isEmpty || !fetchErrorMessage.isEmpty },
             set: { isPresented in
                 if !isPresented {
@@ -338,25 +347,49 @@ struct ConnectionDetailView: View {
 struct SettingsView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
 
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
     var body: some View {
         Form {
-            Section("Terminal Apps") {
-                Button("Detect Installed Terminal Apps") {
+            Section(t("外观与语言", "Appearance & Language")) {
+                Picker(t("语言", "Language"), selection: Binding(
+                    get: { preferences.language },
+                    set: { preferences.setLanguage($0) }
+                )) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+
+                Picker(t("主题", "Theme"), selection: Binding(
+                    get: { preferences.theme },
+                    set: { preferences.setTheme($0) }
+                )) {
+                    Text(t("跟随系统", "Follow System")).tag(AppTheme.system)
+                    Text(t("浅色", "Light")).tag(AppTheme.light)
+                    Text(t("深色", "Dark")).tag(AppTheme.dark)
+                }
+            }
+
+            Section(t("终端应用", "Terminal Apps")) {
+                Button(t("检测已安装终端应用", "Detect Installed Terminal Apps")) {
                     preferences.refreshInstalledApps()
                 }
 
                 if let lastScannedAt = preferences.lastScannedAt {
-                    Text("Last scanned: \(lastScannedAt.formatted(date: .abbreviated, time: .shortened))")
+                    Text("\(t("最近检测", "Last scanned")): \(lastScannedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("尚未检测，默认直接使用系统应用打开 SSH。")
+                    Text(t("尚未检测，默认直接使用系统应用打开 SSH。", "No scan yet. SSH opens with the system app by default."))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
                 if preferences.installedApps.isEmpty {
-                    Text("暂无缓存结果。点击上方按钮按需检测一次。")
+                    Text(t("暂无缓存结果。点击上方按钮按需检测一次。", "No cached results yet. Click the button above to scan on demand."))
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(preferences.installedApps) { app in
