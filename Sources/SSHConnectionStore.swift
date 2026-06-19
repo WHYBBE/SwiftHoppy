@@ -98,7 +98,9 @@ final class SSHConnectionStore: ObservableObject {
 
     func importData(from data: Data) throws {
         do {
-            connections = try decoder.decode([SSHConnection].self, from: data)
+            let imported = try decoder.decode([SSHConnection].self, from: data)
+            connections = imported
+            normalizeManualOrder()
         } catch {
             throw SSHConnectionStoreError.invalidImportData
         }

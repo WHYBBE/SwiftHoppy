@@ -40,12 +40,12 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        kernelVersion = try container.decode(String.self, forKey: .kernelVersion)
-        updateInfo = try container.decode(String.self, forKey: .updateInfo)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kernelVersion = try container.decodeIfPresent(String.self, forKey: .kernelVersion) ?? ""
+        updateInfo = try container.decodeIfPresent(String.self, forKey: .updateInfo) ?? ""
         uptimeInfo = try container.decodeIfPresent(String.self, forKey: .uptimeInfo) ?? ""
         updateRecordedAt = try container.decodeIfPresent(Date.self, forKey: .updateRecordedAt)
-        recordedAt = try container.decode(Date.self, forKey: .recordedAt)
+        recordedAt = try container.decodeIfPresent(Date.self, forKey: .recordedAt) ?? .now
     }
 
     func encode(to encoder: Encoder) throws {
@@ -88,8 +88,6 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case manualOrder
         case createdAt
         case updatedAt
-        case kernelVersion
-        case lastUpdateInfo
     }
 
     init(
@@ -124,36 +122,19 @@ struct SSHConnection: Identifiable, Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        host = try container.decode(String.self, forKey: .host)
-        port = try container.decode(Int.self, forKey: .port)
-        username = try container.decode(String.self, forKey: .username)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        host = try container.decodeIfPresent(String.self, forKey: .host) ?? ""
+        port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
+        username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
         isLocal = try container.decodeIfPresent(Bool.self, forKey: .isLocal) ?? false
-        notes = try container.decode(String.self, forKey: .notes)
-        preferredAppPath = try container.decode(String.self, forKey: .preferredAppPath)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        preferredAppPath = try container.decodeIfPresent(String.self, forKey: .preferredAppPath) ?? ""
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
         manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
-        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
-
-        if let history = try container.decodeIfPresent([SystemInfoSnapshot].self, forKey: .systemInfoHistory) {
-            systemInfoHistory = history
-        } else {
-            let legacyKernelVersion = try container.decodeIfPresent(String.self, forKey: .kernelVersion) ?? ""
-            let legacyLastUpdateInfo = try container.decodeIfPresent(String.self, forKey: .lastUpdateInfo) ?? ""
-            if legacyKernelVersion.isEmpty && legacyLastUpdateInfo.isEmpty {
-                systemInfoHistory = []
-            } else {
-                systemInfoHistory = [
-                    SystemInfoSnapshot(
-                        kernelVersion: legacyKernelVersion,
-                        updateInfo: legacyLastUpdateInfo,
-                        recordedAt: updatedAt
-                    )
-                ]
-            }
-        }
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        systemInfoHistory = try container.decodeIfPresent([SystemInfoSnapshot].self, forKey: .systemInfoHistory) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
