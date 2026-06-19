@@ -65,6 +65,17 @@ final class SSHConnectionStore: ObservableObject {
         return connection.id
     }
 
+    func addSeparator() -> SSHConnection.ID {
+        let nextOrder = (connections.map(\ .manualOrder).max() ?? -1) + 1
+        let separator = SSHConnection(
+            name: "Divider",
+            itemKind: .separator,
+            manualOrder: nextOrder
+        )
+        connections.insert(separator, at: 0)
+        return separator.id
+    }
+
     func update(_ connection: SSHConnection) {
         guard let index = connections.firstIndex(where: { $0.id == connection.id }) else { return }
         var updated = connection

@@ -1,5 +1,10 @@
 import Foundation
 
+enum SSHSidebarItemKind: String, Codable {
+    case connection
+    case separator
+}
+
 struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
     var id: UUID
     var kernelVersion: String
@@ -28,6 +33,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var notes: String
     var systemInfoHistory: [SystemInfoSnapshot]
     var preferredAppPath: String
+    var itemKind: SSHSidebarItemKind
     var manualOrder: Int
     var createdAt: Date
     var updatedAt: Date
@@ -41,6 +47,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case notes
         case systemInfoHistory
         case preferredAppPath
+        case itemKind
         case manualOrder
         case createdAt
         case updatedAt
@@ -57,6 +64,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         notes: String = "",
         systemInfoHistory: [SystemInfoSnapshot] = [],
         preferredAppPath: String = "",
+        itemKind: SSHSidebarItemKind = .connection,
         manualOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -69,6 +77,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.notes = notes
         self.systemInfoHistory = systemInfoHistory
         self.preferredAppPath = preferredAppPath
+        self.itemKind = itemKind
         self.manualOrder = manualOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -83,6 +92,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         username = try container.decode(String.self, forKey: .username)
         notes = try container.decode(String.self, forKey: .notes)
         preferredAppPath = try container.decode(String.self, forKey: .preferredAppPath)
+        itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
         manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
@@ -116,6 +126,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(notes, forKey: .notes)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
+        try container.encode(itemKind, forKey: .itemKind)
         try container.encode(manualOrder, forKey: .manualOrder)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
@@ -127,6 +138,10 @@ struct SSHConnection: Identifiable, Codable, Hashable {
 
     var displayName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? host : name
+    }
+
+    var isSeparator: Bool {
+        itemKind == .separator
     }
 
     var sshURL: URL? {

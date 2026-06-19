@@ -11,6 +11,21 @@ struct ContentView: View {
         preferences.text(chinese, english)
     }
 
+    private var selectableConnectionID: Binding<SSHConnection.ID?> {
+        Binding(
+            get: { selectedID },
+            set: { newValue in
+                guard let newValue else {
+                    selectedID = nil
+                    return
+                }
+                if let connection = store.connections.first(where: { $0.id == newValue }), !connection.isSeparator {
+                    selectedID = newValue
+                }
+            }
+        )
+    }
+
     var body: some View {
         NavigationSplitView {
             ZStack {
@@ -59,28 +74,37 @@ struct ContentView: View {
                             .padding(.horizontal, 12)
                             .padding(.top, 8)
 
-                            List(selection: $selectedID) {
+                            List(selection: selectableConnectionID) {
                                 ForEach(sortedConnections) { connection in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                                            .font(.headline)
-                                            .lineLimit(1)
-
-                                        Text(connection.host)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-
-                                        if let latest = connection.latestSystemInfo,
-                                           !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                            Text(latest.kernelVersion)
-                                                .font(.caption)
-                                                .foregroundStyle(.tertiary)
+                                    if connection.isSeparator {
+                                        SidebarSeparatorRow()
+                                            .contextMenu {
+                                                Button(t("删除分割线", "Delete Divider"), role: .destructive) {
+                                                    deleteConnection(id: connection.id)
+                                                }
+                                            }
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
+                                                .font(.headline)
                                                 .lineLimit(1)
+
+                                            Text(connection.host)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+
+                                            if let latest = connection.latestSystemInfo,
+                                               !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                Text(latest.kernelVersion)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.tertiary)
+                                                    .lineLimit(1)
+                                            }
                                         }
+                                        .padding(.vertical, 4)
+                                        .tag(connection.id)
                                     }
-                                    .padding(.vertical, 4)
-                                    .tag(connection.id)
                                 }
                                 .onDelete(perform: deleteConnections)
                                 .onMove(perform: preferences.connectionSortMode == .manual ? moveConnections : nil)
@@ -102,9 +126,19 @@ struct ContentView: View {
                         Label(t("新增", "Add"), systemImage: "plus")
                     }
                 }
+
+                ToolbarItem {
+                    if preferences.connectionSortMode == .manual {
+                        Button {
+                            selectedID = store.addSeparator()
+                        } label: {
+                            Label(t("新增分割线", "Add Divider"), systemImage: "line.3.horizontal")
+                        }
+                    }
+                }
             }
         } detail: {
-            if let connection = selectedConnection {
+            if let connection = selectedConnection, !connection.isSeparator {
                 ConnectionDetailView(
                     connection: connection,
                     installedApps: preferences.installedApps,
@@ -180,13 +214,13 @@ struct ContentView: View {
                 return $0.manualOrder < $1.manualOrder
             }
         case .name:
-            return store.connections.sorted {
+            return store.connections.filter { !$0.isSeparator }.sorted {
                 let left = $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                 let right = $1.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                 return left.localizedStandardCompare(right) == .orderedAscending
             }
         case .ip:
-            return store.connections.sorted { compareHosts($0.host, $1.host) }
+            return store.connections.filter { !$0.isSeparator }.sorted { compareHosts($0.host, $1.host) }
         }
     }
 
@@ -208,6 +242,13 @@ struct ContentView: View {
         store.connections.removeAll { ids.contains($0.id) }
         if let selectedID, ids.contains(selectedID) {
             self.selectedID = store.connections.first?.id
+        }
+    }
+
+    private func deleteConnection(id: SSHConnection.ID) {
+        store.delete(id: id)
+        if selectedID == id {
+            selectedID = store.connections.first(where: { !$0.isSeparator })?.id
         }
     }
 
@@ -844,5 +885,24 @@ private struct ConnectionRowView: View {
         )
         .shadow(color: .black.opacity(isSelected ? 0.06 : 0.03), radius: isSelected ? 10 : 6, x: 0, y: 4)
         .foregroundStyle(.primary)
+    }
+}
+
+private struct SidebarSeparatorRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(height: 1)
+
+            Image(systemName: "line.3.horizontal")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Rectangle()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 10)
     }
 }
