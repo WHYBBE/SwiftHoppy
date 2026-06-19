@@ -507,6 +507,9 @@ struct ConnectionDetailView: View {
                         Label("\(t("端口", "Port")) \(draft.port)", systemImage: "shippingbox")
                         if let latest = draft.latestSystemInfo {
                             Label(latest.recordedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                            if !latest.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Label(latest.uptimeInfo, systemImage: "timer")
+                            }
                         }
                     }
 
@@ -601,6 +604,12 @@ struct ConnectionDetailView: View {
             modernField(title: t("最后更新信息", "Last Update Info")) {
                 TextField(t("最后更新信息", "Last Update Info"), text: snapshot.updateInfo)
             }
+
+            if !snapshot.wrappedValue.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                modernField(title: t("运行时间", "Uptime")) {
+                    TextField(t("运行时间", "Uptime"), text: snapshot.uptimeInfo)
+                }
+            }
         }
         .padding(16)
         .background(
@@ -637,6 +646,7 @@ struct ConnectionDetailView: View {
                         SystemInfoSnapshot(
                             kernelVersion: info.kernelVersion,
                             updateInfo: info.updateInfo,
+                            uptimeInfo: info.uptimeInfo,
                             recordedAt: info.recordedAt
                         ),
                         at: 0

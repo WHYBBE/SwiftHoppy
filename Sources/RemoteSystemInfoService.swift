@@ -3,6 +3,7 @@ import Foundation
 struct RemoteSystemInfo {
     let kernelVersion: String
     let updateInfo: String
+    let uptimeInfo: String
     let recordedAt: Date
 }
 
@@ -52,6 +53,13 @@ enum RemoteSystemInfoService {
         elif command -v sw_vers >/dev/null 2>&1; then
             sw_vers 2>/dev/null | tr '\n' ' '
         fi
+        if [ -r /proc/uptime ]; then
+            awk '{print int($1)}' /proc/uptime 2>/dev/null
+        elif uptime -p >/dev/null 2>&1; then
+            uptime -p 2>/dev/null
+        else
+            uptime 2>/dev/null
+        fi
         """#
 
         let process = Process()
@@ -85,7 +93,110 @@ enum RemoteSystemInfoService {
 
         let kernelVersion = lines.first ?? "Unknown"
         let updateInfo = lines.dropFirst().first ?? "未检测到更新信息"
-        return RemoteSystemInfo(kernelVersion: kernelVersion, updateInfo: updateInfo, recordedAt: .now)
+        let uptimeInfo = formatUptime(lines.dropFirst(2).first ?? "")
+        return RemoteSystemInfo(kernelVersion: kernelVersion, updateInfo: updateInfo, uptimeInfo: uptimeInfo, recordedAt: .now)
+    }
+
+    private static func formatUptime(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        if let seconds = Int(trimmed) {
+            return formatDuration(seconds: seconds)
+        }
+
+        if let pretty = parsePrettyUptime(trimmed) {
+            return pretty
+        }
+
+        if let classic = parseClassicUptime(trimmed) {
+            return classic
+        }
+
+        return ""
+    }
+
+    private static func parsePrettyUptime(_ raw: String) -> String? {
+        let normalized = raw.lowercased().replacingOccurrences(of: "up ", with: "")
+        let parts = normalized
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var totalMinutes = 0
+
+        for part in parts {
+            let tokens = part.split(separator: " ")
+            guard let valueToken = tokens.first, let value = Int(valueToken) else { continue }
+
+            if part.contains("week") {
+                totalMinutes += value * 7 * 24 * 60
+            } else if part.contains("day") {
+                totalMinutes += value * 24 * 60
+            } else if part.contains("hour") {
+                totalMinutes += value * 60
+            } else if part.contains("minute") {
+                totalMinutes += value
+            }
+        }
+
+        guard totalMinutes > 0 else { return nil }
+        return formatDuration(seconds: totalMinutes * 60)
+    }
+
+    private static func parseClassicUptime(_ raw: String) -> String? {
+        let lowercased = raw.lowercased()
+        guard let upRange = lowercased.range(of: " up ") else { return nil }
+        var uptimePart = String(lowercased[upRange.upperBound...])
+
+        if let usersRange = uptimePart.range(of: #",\\s+\d+\s+user"#, options: .regularExpression) {
+            uptimePart = String(uptimePart[..<usersRange.lowerBound])
+        } else if let loadRange = uptimePart.range(of: ", load average:") {
+            uptimePart = String(uptimePart[..<loadRange.lowerBound])
+        }
+
+        uptimePart = uptimePart.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uptimePart.isEmpty else { return nil }
+
+        var totalMinutes = 0
+        for part in uptimePart.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            if let dayMatch = part.range(of: #"^(\d+)\s+day[s]?$"#, options: .regularExpression) {
+                let value = Int(part[dayMatch].split(separator: " ").first ?? "") ?? 0
+                totalMinutes += value * 24 * 60
+                continue
+            }
+
+            if let hourMinuteMatch = part.range(of: #"^(\d+):(\d+)$"#, options: .regularExpression) {
+                let value = String(part[hourMinuteMatch]).split(separator: ":")
+                if value.count == 2 {
+                    totalMinutes += (Int(value[0]) ?? 0) * 60
+                    totalMinutes += Int(value[1]) ?? 0
+                }
+                continue
+            }
+
+            if let minuteMatch = part.range(of: #"^(\d+)\s+min[s]?$"#, options: .regularExpression) {
+                let value = Int(part[minuteMatch].split(separator: " ").first ?? "") ?? 0
+                totalMinutes += value
+                continue
+            }
+        }
+
+        guard totalMinutes > 0 else { return nil }
+        return formatDuration(seconds: totalMinutes * 60)
+    }
+
+    private static func formatDuration(seconds: Int) -> String {
+        guard seconds > 0 else { return "" }
+
+        let days = seconds / 86_400
+        let hours = (seconds % 86_400) / 3_600
+        let minutes = (seconds % 3_600) / 60
+
+        var parts: [String] = []
+        if days > 0 { parts.append("\(days)d") }
+        if hours > 0 { parts.append("\(hours)h") }
+        if minutes > 0 || parts.isEmpty { parts.append("\(minutes)m") }
+        return parts.joined(separator: " ")
     }
 
     private static func sshArguments(for connection: SSHConnection) -> [String] {

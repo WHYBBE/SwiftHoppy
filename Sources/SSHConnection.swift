@@ -9,18 +9,47 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
     var id: UUID
     var kernelVersion: String
     var updateInfo: String
+    var uptimeInfo: String
     var recordedAt: Date
 
     init(
         id: UUID = UUID(),
         kernelVersion: String = "",
         updateInfo: String = "",
+        uptimeInfo: String = "",
         recordedAt: Date = .now
     ) {
         self.id = id
         self.kernelVersion = kernelVersion
         self.updateInfo = updateInfo
+        self.uptimeInfo = uptimeInfo
         self.recordedAt = recordedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case kernelVersion
+        case updateInfo
+        case uptimeInfo
+        case recordedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        kernelVersion = try container.decode(String.self, forKey: .kernelVersion)
+        updateInfo = try container.decode(String.self, forKey: .updateInfo)
+        uptimeInfo = try container.decodeIfPresent(String.self, forKey: .uptimeInfo) ?? ""
+        recordedAt = try container.decode(Date.self, forKey: .recordedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kernelVersion, forKey: .kernelVersion)
+        try container.encode(updateInfo, forKey: .updateInfo)
+        try container.encode(uptimeInfo, forKey: .uptimeInfo)
+        try container.encode(recordedAt, forKey: .recordedAt)
     }
 }
 
