@@ -570,14 +570,15 @@ struct ConnectionDetailView: View {
     }
 
     private func modernField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
             content()
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .font(.subheadline)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Color.primary.opacity(0.04))
@@ -586,15 +587,17 @@ struct ConnectionDetailView: View {
     }
 
     private func snapshotCard(snapshot: Binding<SystemInfoSnapshot>) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(snapshot.wrappedValue.recordedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button(t("删除", "Delete")) {
                     deleteSnapshot(id: snapshot.wrappedValue.id)
                 }
                 .buttonStyle(.link)
+                .font(.caption)
             }
 
             modernField(title: t("内核版本", "Kernel Version")) {
@@ -611,13 +614,13 @@ struct ConnectionDetailView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.primary.opacity(0.04))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.06))
         )
     }
