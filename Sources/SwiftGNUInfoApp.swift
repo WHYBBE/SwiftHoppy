@@ -29,6 +29,7 @@ struct SwiftGNUInfoApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(store)
                 .environmentObject(preferences)
                 .preferredColorScheme(colorScheme)
         }

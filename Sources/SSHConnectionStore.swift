@@ -1,5 +1,16 @@
 import Foundation
 
+enum SSHConnectionStoreError: LocalizedError {
+    case invalidImportData
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImportData:
+            return "无法导入该文件，JSON 格式无效或内容不匹配。"
+        }
+    }
+}
+
 @MainActor
 final class SSHConnectionStore: ObservableObject {
     @Published var connections: [SSHConnection] = [] {
@@ -63,6 +74,22 @@ final class SSHConnectionStore: ObservableObject {
 
     func delete(id: SSHConnection.ID) {
         connections.removeAll { $0.id == id }
+    }
+
+    func exportData() throws -> Data {
+        try encoder.encode(connections)
+    }
+
+    func importData(from data: Data) throws {
+        do {
+            connections = try decoder.decode([SSHConnection].self, from: data)
+        } catch {
+            throw SSHConnectionStoreError.invalidImportData
+        }
+    }
+
+    func clearAll() {
+        connections = []
     }
 
     private func load() {

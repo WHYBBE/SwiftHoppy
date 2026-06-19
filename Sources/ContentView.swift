@@ -510,7 +510,10 @@ struct ConnectionDetailView: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject private var store: SSHConnectionStore
     @EnvironmentObject private var preferences: AppPreferencesStore
+    @State private var settingsErrorMessage = ""
+    @State private var showClearConfirmation = false
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
@@ -588,11 +591,60 @@ struct SettingsView: View {
                             }
                         }
                     }
+
+                    settingsCard(title: t("数据管理", "Data Management"), icon: "externaldrive.fill.badge.person.crop") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Button(t("导出数据", "Export Data")) {
+                                    exportConnections()
+                                }
+
+                                Button(t("导入数据", "Import Data")) {
+                                    importConnections()
+                                }
+
+                                Button(t("清空全部数据", "Clear All Data"), role: .destructive) {
+                                    showClearConfirmation = true
+                                }
+                            }
+
+                            Text(t("导出为 JSON，导入会直接替换当前全部连接记录。", "Exports JSON. Import replaces all current connection records."))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .padding(22)
             }
         }
         .frame(width: 640, height: 560)
+        .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
+            get: { !settingsErrorMessage.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    settingsErrorMessage = ""
+                }
+            }
+        )) {
+            Button("OK") {
+                settingsErrorMessage = ""
+            }
+        } message: {
+            Text(settingsErrorMessage)
+        }
+        .confirmationDialog(
+            t("确认清空全部数据？", "Clear all data?"),
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(t("清空全部数据", "Clear All Data"), role: .destructive) {
+                store.clearAll()
+            }
+            Button(t("取消", "Cancel"), role: .cancel) {
+            }
+        } message: {
+            Text(t("此操作不可撤销，所有 SSH 连接和系统历史都会被删除。", "This cannot be undone. All SSH connections and system history will be removed."))
+        }
     }
 
     private func settingsCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
@@ -611,6 +663,39 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08))
         )
+    }
+
+    private func exportConnections() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "swiftgnuinfo-connections.json"
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try store.exportData()
+            try data.write(to: url, options: .atomic)
+        } catch {
+            settingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func importConnections() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            try store.importData(from: data)
+        } catch {
+            settingsErrorMessage = error.localizedDescription
+        }
     }
 }
 
