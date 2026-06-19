@@ -267,16 +267,22 @@ struct ContentView: View {
     }
 
     private func updateStatus(for connection: SSHConnection) -> (label: String, color: Color)? {
-        guard let latest = connection.latestSystemInfo else { return nil }
+        guard let latest = connection.latestSystemInfo,
+              let updateDate = latest.updateRecordedAt else {
+            return nil
+        }
 
-        let days = Calendar.current.dateComponents([.day], from: latest.recordedAt, to: .now).day ?? 0
+        let calendar = Calendar.current
+        let startOfUpdateDay = calendar.startOfDay(for: updateDate)
+        let startOfToday = calendar.startOfDay(for: .now)
+        let days = max(0, calendar.dateComponents([.day], from: startOfUpdateDay, to: startOfToday).day ?? 0)
         let label: String
         if days <= 0 {
             label = t("今天", "Today")
-        } else if days < 7 {
+        } else if days < 30 {
             label = "\(days)\(t("天", "d"))"
         } else {
-            label = latest.recordedAt.formatted(date: .abbreviated, time: .omitted)
+            label = updateDate.formatted(date: .abbreviated, time: .omitted)
         }
 
         switch days {
@@ -317,6 +323,11 @@ struct ContentView: View {
     }
 
     private func openConnection(_ connection: SSHConnection) {
+        if connection.isLocal {
+            openLocalTerminal(with: connection.preferredAppPath)
+            return
+        }
+
         guard let url = connection.sshURL else {
             errorMessage = t("SSH 地址无效，请检查主机、端口和用户名。", "Invalid SSH address. Check host, port, and username.")
             return
@@ -332,6 +343,21 @@ struct ContentView: View {
         NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: appPath), configuration: configuration) { _, error in
             if let error {
                 errorMessage = "\(t("打开 SSH 连接失败", "Failed to open SSH connection"))：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func openLocalTerminal(with preferredAppPath: String) {
+        let trimmedPath = preferredAppPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetURL = trimmedPath.isEmpty
+            ? URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            : URL(fileURLWithPath: trimmedPath)
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: targetURL, configuration: configuration) { _, error in
+            if let error {
+                errorMessage = "\(t("打开终端失败", "Failed to open terminal"))：\(error.localizedDescription)"
             }
         }
     }
@@ -387,23 +413,32 @@ struct ConnectionDetailView: View {
                                     modernField(title: t("名称", "Name")) {
                                         TextField(t("名称", "Name"), text: $draft.name)
                                     }
-                                    modernField(title: t("主机", "Host")) {
-                                        TextField(t("主机", "Host"), text: $draft.host)
+                                    Toggle(isOn: $draft.isLocal) {
+                                        Text(t("标记为本地", "Mark as Local"))
                                     }
-                                    modernField(title: t("用户名", "Username")) {
-                                        TextField(t("用户名", "Username"), text: $draft.username)
-                                    }
-                                    modernField(title: t("端口", "Port")) {
-                                        HStack(spacing: 10) {
-                                            TextField(
-                                                t("端口", "Port"),
-                                                value: $draft.port,
-                                                format: .number
-                                            )
-                                            .textFieldStyle(.plain)
+                                    if draft.isLocal {
+                                        Text(t("本地模式下会直接读取当前 macOS，不需要主机、用户名和端口。", "Local mode reads the current macOS directly, so host, username, and port are not required."))
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        modernField(title: t("主机", "Host")) {
+                                            TextField(t("主机", "Host"), text: $draft.host)
+                                        }
+                                        modernField(title: t("用户名", "Username")) {
+                                            TextField(t("用户名", "Username"), text: $draft.username)
+                                        }
+                                        modernField(title: t("端口", "Port")) {
+                                            HStack(spacing: 10) {
+                                                TextField(
+                                                    t("端口", "Port"),
+                                                    value: $draft.port,
+                                                    format: .number
+                                                )
+                                                .textFieldStyle(.plain)
 
-                                            Stepper("", value: $draft.port, in: 1...65535)
-                                                .labelsHidden()
+                                                Stepper("", value: $draft.port, in: 1...65535)
+                                                    .labelsHidden()
+                                            }
                                         }
                                     }
                                 }
@@ -461,18 +496,18 @@ struct ConnectionDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         detailCard(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
                             VStack(alignment: .leading, spacing: 14) {
-                                HStack {
-                                    Button(isFetchingSystemInfo ? t("正在通过 SSH 读取...", "Reading via SSH...") : t("通过 SSH 读取", "Read via SSH")) {
-                                        refreshRemoteSystemInfo()
-                                    }
-                                    .disabled(isFetchingSystemInfo)
+                                    HStack {
+                                        Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
+                                            refreshRemoteSystemInfo()
+                                        }
+                                        .disabled(isFetchingSystemInfo)
 
                                     Button(t("手动新增", "Add Manual Entry")) {
                                         draft.systemInfoHistory.insert(SystemInfoSnapshot(), at: 0)
                                     }
                                 }
 
-                                Text(t("每次 SSH 读取都会追加一条历史，也可手动补录。", "Each SSH read adds a history item, and you can also add entries manually."))
+                                Text(draft.isLocal ? t("本地模式下会执行本机命令读取系统历史，也可手动补录。", "In local mode, system history is read from local commands, and you can also add entries manually.") : t("每次 SSH 读取都会追加一条历史，也可手动补录。", "Each SSH read adds a history item, and you can also add entries manually."))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
 
@@ -542,7 +577,7 @@ struct ConnectionDetailView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
-                        Label(draft.host.isEmpty ? t("未填写主机", "No host") : draft.host, systemImage: "server.rack")
+                        Label(draft.isLocal ? t("本机", "Local") : (draft.host.isEmpty ? t("未填写主机", "No host") : draft.host), systemImage: draft.isLocal ? "desktopcomputer" : "server.rack")
                         Label("\(t("端口", "Port")) \(draft.port)", systemImage: "shippingbox")
                         if let latest = draft.latestSystemInfo {
                             Label(latest.recordedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
@@ -552,7 +587,7 @@ struct ConnectionDetailView: View {
                         }
                     }
 
-                    if let url = draft.sshURL {
+                    if !draft.isLocal, let url = draft.sshURL {
                         Label(url.absoluteString, systemImage: "link")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -566,7 +601,7 @@ struct ConnectionDetailView: View {
             Spacer()
 
             HStack(spacing: 10) {
-                Button(t("打开 SSH", "Open SSH")) {
+                Button(draft.isLocal ? t("打开终端", "Open Terminal") : t("打开 SSH", "Open SSH")) {
                     onOpen(draft)
                 }
                 .buttonStyle(.borderedProminent)
@@ -689,6 +724,7 @@ struct ConnectionDetailView: View {
                             kernelVersion: info.kernelVersion,
                             updateInfo: info.updateInfo,
                             uptimeInfo: info.uptimeInfo,
+                            updateRecordedAt: info.updateRecordedAt,
                             recordedAt: info.recordedAt
                         ),
                         at: 0

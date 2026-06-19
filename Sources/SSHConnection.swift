@@ -10,6 +10,7 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
     var kernelVersion: String
     var updateInfo: String
     var uptimeInfo: String
+    var updateRecordedAt: Date?
     var recordedAt: Date
 
     init(
@@ -17,12 +18,14 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         kernelVersion: String = "",
         updateInfo: String = "",
         uptimeInfo: String = "",
+        updateRecordedAt: Date? = nil,
         recordedAt: Date = .now
     ) {
         self.id = id
         self.kernelVersion = kernelVersion
         self.updateInfo = updateInfo
         self.uptimeInfo = uptimeInfo
+        self.updateRecordedAt = updateRecordedAt
         self.recordedAt = recordedAt
     }
 
@@ -31,6 +34,7 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         case kernelVersion
         case updateInfo
         case uptimeInfo
+        case updateRecordedAt
         case recordedAt
     }
 
@@ -40,6 +44,7 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         kernelVersion = try container.decode(String.self, forKey: .kernelVersion)
         updateInfo = try container.decode(String.self, forKey: .updateInfo)
         uptimeInfo = try container.decodeIfPresent(String.self, forKey: .uptimeInfo) ?? ""
+        updateRecordedAt = try container.decodeIfPresent(Date.self, forKey: .updateRecordedAt)
         recordedAt = try container.decode(Date.self, forKey: .recordedAt)
     }
 
@@ -49,6 +54,7 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         try container.encode(kernelVersion, forKey: .kernelVersion)
         try container.encode(updateInfo, forKey: .updateInfo)
         try container.encode(uptimeInfo, forKey: .uptimeInfo)
+        try container.encodeIfPresent(updateRecordedAt, forKey: .updateRecordedAt)
         try container.encode(recordedAt, forKey: .recordedAt)
     }
 }
@@ -59,6 +65,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var host: String
     var port: Int
     var username: String
+    var isLocal: Bool
     var notes: String
     var systemInfoHistory: [SystemInfoSnapshot]
     var preferredAppPath: String
@@ -73,6 +80,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case host
         case port
         case username
+        case isLocal
         case notes
         case systemInfoHistory
         case preferredAppPath
@@ -90,6 +98,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         host: String = "",
         port: Int = 22,
         username: String = "",
+        isLocal: Bool = false,
         notes: String = "",
         systemInfoHistory: [SystemInfoSnapshot] = [],
         preferredAppPath: String = "",
@@ -103,6 +112,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.host = host
         self.port = port
         self.username = username
+        self.isLocal = isLocal
         self.notes = notes
         self.systemInfoHistory = systemInfoHistory
         self.preferredAppPath = preferredAppPath
@@ -119,6 +129,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         host = try container.decode(String.self, forKey: .host)
         port = try container.decode(Int.self, forKey: .port)
         username = try container.decode(String.self, forKey: .username)
+        isLocal = try container.decodeIfPresent(Bool.self, forKey: .isLocal) ?? false
         notes = try container.decode(String.self, forKey: .notes)
         preferredAppPath = try container.decode(String.self, forKey: .preferredAppPath)
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
@@ -152,6 +163,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(host, forKey: .host)
         try container.encode(port, forKey: .port)
         try container.encode(username, forKey: .username)
+        try container.encode(isLocal, forKey: .isLocal)
         try container.encode(notes, forKey: .notes)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)

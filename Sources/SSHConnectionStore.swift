@@ -43,6 +43,7 @@ final class SSHConnectionStore: ObservableObject {
                     name: "Production",
                     host: "192.168.1.10",
                     username: "root",
+                    isLocal: false,
                     notes: "示例记录，可直接修改或删除。",
                     systemInfoHistory: [
                         SystemInfoSnapshot(
@@ -60,7 +61,7 @@ final class SSHConnectionStore: ObservableObject {
 
     func addConnection() -> SSHConnection.ID {
         let nextOrder = (connections.map(\ .manualOrder).max() ?? -1) + 1
-        let connection = SSHConnection(name: "New Connection", manualOrder: nextOrder)
+        let connection = SSHConnection(name: "New Connection", isLocal: false, manualOrder: nextOrder)
         connections.insert(connection, at: 0)
         return connection.id
     }
