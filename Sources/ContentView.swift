@@ -112,6 +112,19 @@ struct ContentView: View {
                                                     .foregroundStyle(.tertiary)
                                                     .lineLimit(1)
                                             }
+
+                                            if let status = updateStatus(for: connection) {
+                                                HStack(spacing: 6) {
+                                                    Circle()
+                                                        .fill(status.color)
+                                                        .frame(width: 7, height: 7)
+
+                                                    Text(status.label)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(status.color)
+                                                        .lineLimit(1)
+                                                }
+                                            }
                                         }
                                         .padding(.vertical, 4)
                                         .tag(connection.id)
@@ -250,6 +263,31 @@ struct ContentView: View {
         store.delete(id: id)
         if selectedID == id {
             selectedID = store.connections.first(where: { !$0.isSeparator })?.id
+        }
+    }
+
+    private func updateStatus(for connection: SSHConnection) -> (label: String, color: Color)? {
+        guard let latest = connection.latestSystemInfo else { return nil }
+
+        let days = Calendar.current.dateComponents([.day], from: latest.recordedAt, to: .now).day ?? 0
+        let label: String
+        if days <= 0 {
+            label = t("今天", "Today")
+        } else if days < 7 {
+            label = "\(days)\(t("天", "d"))"
+        } else {
+            label = latest.recordedAt.formatted(date: .abbreviated, time: .omitted)
+        }
+
+        switch days {
+        case ..<7:
+            return (label, .green)
+        case 7..<14:
+            return (label, .orange)
+        case 14..<30:
+            return (label, Color(red: 0.85, green: 0.4, blue: 0.15))
+        default:
+            return (label, .red)
         }
     }
 
