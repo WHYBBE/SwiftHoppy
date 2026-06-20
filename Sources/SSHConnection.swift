@@ -5,12 +5,39 @@ enum SSHSidebarItemKind: String, Codable {
     case separator
 }
 
+struct NoteEntry: Identifiable, Codable, Hashable {
+    var id: UUID
+    var content: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), content: String = "", createdAt: Date = .now) {
+        self.id = id
+        self.content = content
+        self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+    }
+}
+
 struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
     var id: UUID
     var kernelVersion: String
     var updateInfo: String
     var uptimeInfo: String
     var updateRecordedAt: Date?
+    var isManualEntry: Bool
+    var isEdited: Bool
     var recordedAt: Date
 
     init(
@@ -19,6 +46,8 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         updateInfo: String = "",
         uptimeInfo: String = "",
         updateRecordedAt: Date? = nil,
+        isManualEntry: Bool = false,
+        isEdited: Bool = false,
         recordedAt: Date = .now
     ) {
         self.id = id
@@ -26,6 +55,8 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         self.updateInfo = updateInfo
         self.uptimeInfo = uptimeInfo
         self.updateRecordedAt = updateRecordedAt
+        self.isManualEntry = isManualEntry
+        self.isEdited = isEdited
         self.recordedAt = recordedAt
     }
 
@@ -35,6 +66,8 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         case updateInfo
         case uptimeInfo
         case updateRecordedAt
+        case isManualEntry
+        case isEdited
         case recordedAt
     }
 
@@ -45,6 +78,8 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         updateInfo = try container.decodeIfPresent(String.self, forKey: .updateInfo) ?? ""
         uptimeInfo = try container.decodeIfPresent(String.self, forKey: .uptimeInfo) ?? ""
         updateRecordedAt = try container.decodeIfPresent(Date.self, forKey: .updateRecordedAt)
+        isManualEntry = try container.decodeIfPresent(Bool.self, forKey: .isManualEntry) ?? false
+        isEdited = try container.decodeIfPresent(Bool.self, forKey: .isEdited) ?? false
         recordedAt = try container.decodeIfPresent(Date.self, forKey: .recordedAt) ?? .now
     }
 
@@ -55,6 +90,8 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
         try container.encode(updateInfo, forKey: .updateInfo)
         try container.encode(uptimeInfo, forKey: .uptimeInfo)
         try container.encodeIfPresent(updateRecordedAt, forKey: .updateRecordedAt)
+        try container.encode(isManualEntry, forKey: .isManualEntry)
+        try container.encode(isEdited, forKey: .isEdited)
         try container.encode(recordedAt, forKey: .recordedAt)
     }
 }
@@ -66,7 +103,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var port: Int
     var username: String
     var isLocal: Bool
-    var notes: String
+    var notesEntries: [NoteEntry]
     var systemInfoHistory: [SystemInfoSnapshot]
     var preferredAppPath: String
     var itemKind: SSHSidebarItemKind
@@ -81,7 +118,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case port
         case username
         case isLocal
-        case notes
+        case notesEntries
         case systemInfoHistory
         case preferredAppPath
         case itemKind
@@ -97,7 +134,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         port: Int = 22,
         username: String = "",
         isLocal: Bool = false,
-        notes: String = "",
+        notesEntries: [NoteEntry] = [],
         systemInfoHistory: [SystemInfoSnapshot] = [],
         preferredAppPath: String = "",
         itemKind: SSHSidebarItemKind = .connection,
@@ -111,7 +148,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.port = port
         self.username = username
         self.isLocal = isLocal
-        self.notes = notes
+        self.notesEntries = notesEntries
         self.systemInfoHistory = systemInfoHistory
         self.preferredAppPath = preferredAppPath
         self.itemKind = itemKind
@@ -128,7 +165,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
         username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
         isLocal = try container.decodeIfPresent(Bool.self, forKey: .isLocal) ?? false
-        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        notesEntries = try container.decodeIfPresent([NoteEntry].self, forKey: .notesEntries) ?? []
         preferredAppPath = try container.decodeIfPresent(String.self, forKey: .preferredAppPath) ?? ""
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
         manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
@@ -145,7 +182,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(port, forKey: .port)
         try container.encode(username, forKey: .username)
         try container.encode(isLocal, forKey: .isLocal)
-        try container.encode(notes, forKey: .notes)
+        try container.encode(notesEntries, forKey: .notesEntries)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
         try container.encode(itemKind, forKey: .itemKind)

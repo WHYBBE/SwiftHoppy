@@ -44,7 +44,9 @@ final class SSHConnectionStore: ObservableObject {
                     host: "192.168.1.10",
                     username: "root",
                     isLocal: false,
-                    notes: "示例记录，可直接修改或删除。",
+                    notesEntries: [
+                        NoteEntry(content: "示例记录，可直接修改或删除。")
+                    ],
                     systemInfoHistory: [
                         SystemInfoSnapshot(
                             kernelVersion: "Linux 6.8.0-31-generic",

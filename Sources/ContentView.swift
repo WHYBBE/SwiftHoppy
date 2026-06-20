@@ -368,6 +368,10 @@ struct ConnectionDetailView: View {
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
     @State private var fetchErrorMessage = ""
+    @State private var showConnectionEditor = false
+    @State private var showNotesEditor = false
+    @State private var editingSnapshot: SystemInfoSnapshot?
+    @State private var creatingManualSnapshot = false
     let installedApps: [InstalledTerminalApp]
     let onSave: (SSHConnection) -> Void
     let onDelete: () -> Void
@@ -408,86 +412,33 @@ struct ConnectionDetailView: View {
                 HStack(alignment: .top, spacing: 18) {
                     ScrollView {
                         VStack(spacing: 16) {
-                            detailCard(title: t("连接信息", "Connection"), icon: "network") {
-                                VStack(spacing: 12) {
-                                    modernField(title: t("名称", "Name")) {
-                                        TextField(t("名称", "Name"), text: $draft.name)
-                                    }
-                                    Toggle(isOn: $draft.isLocal) {
-                                        Text(t("标记为本地", "Mark as Local"))
-                                    }
-                                    if draft.isLocal {
-                                        Text(t("本地模式下会直接读取当前 macOS，不需要主机、用户名和端口。", "Local mode reads the current macOS directly, so host, username, and port are not required."))
-                                            .font(.footnote)
+                            detailCard(title: t("备注", "Notes"), icon: "note.text") {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if draft.notesEntries.isEmpty {
+                                        Text(t("暂无备注。", "No notes yet."))
                                             .foregroundStyle(.secondary)
                                     } else {
-                                        modernField(title: t("主机", "Host")) {
-                                            TextField(t("主机", "Host"), text: $draft.host)
-                                        }
-                                        modernField(title: t("用户名", "Username")) {
-                                            TextField(t("用户名", "Username"), text: $draft.username)
-                                        }
-                                        modernField(title: t("端口", "Port")) {
-                                            HStack(spacing: 10) {
-                                                TextField(
-                                                    t("端口", "Port"),
-                                                    value: $draft.port,
-                                                    format: .number
-                                                )
-                                                .textFieldStyle(.plain)
-
-                                                Stepper("", value: $draft.port, in: 1...65535)
-                                                    .labelsHidden()
+                                        ForEach(draft.notesEntries.sorted { $0.createdAt > $1.createdAt }) { note in
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text(note.content)
+                                                    .font(.body)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
                                             }
+                                            .padding(10)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                    .fill(Color.primary.opacity(0.04))
+                                            )
                                         }
+                                    }
+
+                                    Button(t("管理备注", "Manage Notes")) {
+                                        showNotesEditor = true
                                     }
                                 }
-                            }
-
-                            detailCard(title: t("打开方式", "Open With"), icon: "app.connected.to.app.below.fill") {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Picker(t("已安装应用", "Installed Apps"), selection: $draft.preferredAppPath) {
-                                        Text(t("系统默认", "System Default")).tag("")
-                                        ForEach(installedApps) { app in
-                                            Text(app.name).tag(app.path)
-                                        }
-                                    }
-                                    .labelsHidden()
-
-                                    if !draft.preferredAppPath.isEmpty {
-                                        Text(draft.preferredAppPath)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-
-                                    HStack {
-                                        Button(t("选择应用", "Choose Application")) {
-                                            chooseApplication()
-                                        }
-
-                                        if !draft.preferredAppPath.isEmpty {
-                                            Button(t("清除", "Clear")) {
-                                                draft.preferredAppPath = ""
-                                            }
-                                        }
-                                    }
-
-                                    Text(t("默认使用系统应用。可在设置中检测并缓存已安装终端，或手动选择任意 .app。", "Uses the system app by default. You can detect installed terminal apps in Settings or choose any .app manually."))
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            detailCard(title: t("备注", "Notes"), icon: "note.text") {
-                                TextEditor(text: $draft.notes)
-                                    .font(.body)
-                                    .frame(minHeight: 220)
-                                    .padding(10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(Color.primary.opacity(0.04))
-                                    )
                             }
                         }
                     }
@@ -496,18 +447,18 @@ struct ConnectionDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         detailCard(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
                             VStack(alignment: .leading, spacing: 14) {
-                                    HStack {
-                                        Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
-                                            refreshRemoteSystemInfo()
-                                        }
-                                        .disabled(isFetchingSystemInfo)
+                                HStack {
+                                    Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
+                                        refreshRemoteSystemInfo()
+                                    }
+                                    .disabled(isFetchingSystemInfo)
 
-                                    Button(t("手动新增", "Add Manual Entry")) {
-                                        draft.systemInfoHistory.insert(SystemInfoSnapshot(), at: 0)
+                                    Button(t("新建手填", "New Manual Entry")) {
+                                        creatingManualSnapshot = true
                                     }
                                 }
 
-                                Text(draft.isLocal ? t("本地模式下会执行本机命令读取系统历史，也可手动补录。", "In local mode, system history is read from local commands, and you can also add entries manually.") : t("每次 SSH 读取都会追加一条历史，也可手动补录。", "Each SSH read adds a history item, and you can also add entries manually."))
+                                Text(draft.isLocal ? t("本地模式下会执行本机命令读取系统历史。", "In local mode, system history is read from local commands.") : t("每次读取都会追加一条新的系统历史。", "Each read adds a new system history entry."))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
 
@@ -523,8 +474,16 @@ struct ConnectionDetailView: View {
                                 } else {
                                     ScrollView {
                                         VStack(spacing: 12) {
-                                            ForEach($draft.systemInfoHistory) { $snapshot in
-                                                snapshotCard(snapshot: $snapshot)
+                                            ForEach(draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }) { snapshot in
+                                                snapshotCard(snapshot: snapshot)
+                                                    .contextMenu {
+                                                        Button(t("编辑", "Edit")) {
+                                                            editingSnapshot = snapshot
+                                                        }
+                                                        Button(t("删除", "Delete"), role: .destructive) {
+                                                            deleteSnapshot(id: snapshot.id)
+                                                        }
+                                                    }
                                             }
                                         }
                                     }
@@ -557,6 +516,24 @@ struct ConnectionDetailView: View {
             }
         } message: {
             Text(fetchErrorMessage.isEmpty ? errorMessage : fetchErrorMessage)
+        }
+        .sheet(isPresented: $showConnectionEditor) {
+            ConnectionInfoEditorView(connection: $draft, installedApps: installedApps, chooseApplication: chooseApplication)
+        }
+        .sheet(isPresented: $showNotesEditor) {
+            NotesEditorView(notesEntries: $draft.notesEntries)
+        }
+        .sheet(item: $editingSnapshot) { snapshot in
+            SystemHistoryEditorView(snapshot: snapshot, title: t("编辑系统历史", "Edit System History")) { updatedSnapshot in
+                if let index = draft.systemInfoHistory.firstIndex(where: { $0.id == updatedSnapshot.id }) {
+                    draft.systemInfoHistory[index] = updatedSnapshot
+                }
+            }
+        }
+        .sheet(isPresented: $creatingManualSnapshot) {
+            SystemHistoryEditorView(snapshot: SystemInfoSnapshot(isManualEntry: true), title: t("新建手填历史", "New Manual History")) { newSnapshot in
+                draft.systemInfoHistory.insert(newSnapshot, at: 0)
+            }
         }
     }
 
@@ -601,6 +578,14 @@ struct ConnectionDetailView: View {
             Spacer()
 
             HStack(spacing: 10) {
+                Button(t("编辑信息", "Edit Info")) {
+                    showConnectionEditor = true
+                }
+
+                Button(t("添加备注", "Add Note")) {
+                    showNotesEditor = true
+                }
+
                 Button(draft.isLocal ? t("打开终端", "Open Terminal") : t("打开 SSH", "Open SSH")) {
                     onOpen(draft)
                 }
@@ -643,6 +628,18 @@ struct ConnectionDetailView: View {
         .shadow(color: .black.opacity(0.05), radius: 16, x: 0, y: 8)
     }
 
+    private func detailSummaryRow(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func modernField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
@@ -660,32 +657,38 @@ struct ConnectionDetailView: View {
         }
     }
 
-    private func snapshotCard(snapshot: Binding<SystemInfoSnapshot>) -> some View {
+    private func snapshotCard(snapshot: SystemInfoSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(snapshot.wrappedValue.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(snapshot.recordedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(t("删除", "Delete")) {
-                    deleteSnapshot(id: snapshot.wrappedValue.id)
+
+                if snapshot.isManualEntry {
+                    Text(t("手填", "Manual"))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.12), in: Capsule())
+                        .foregroundStyle(Color.blue)
                 }
-                .buttonStyle(.link)
-                .font(.caption)
-            }
 
-            modernField(title: t("内核版本", "Kernel Version")) {
-                TextField(t("内核版本", "Kernel Version"), text: snapshot.kernelVersion)
-            }
-
-            modernField(title: t("最后更新信息", "Last Update Info")) {
-                TextField(t("最后更新信息", "Last Update Info"), text: snapshot.updateInfo)
-            }
-
-            if !snapshot.wrappedValue.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                modernField(title: t("运行时间", "Uptime")) {
-                    TextField(t("运行时间", "Uptime"), text: snapshot.uptimeInfo)
+                if snapshot.isEdited {
+                    Text(t("已编辑", "Edited"))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.12), in: Capsule())
+                        .foregroundStyle(Color.purple)
                 }
+            }
+
+            detailSummaryRow(title: t("内核版本", "Kernel Version"), value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion)
+            detailSummaryRow(title: t("最后更新信息", "Last Update Info"), value: snapshot.updateInfo.isEmpty ? "-" : snapshot.updateInfo)
+
+            if !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                detailSummaryRow(title: t("运行时间", "Uptime"), value: snapshot.uptimeInfo)
             }
         }
         .padding(10)
@@ -725,6 +728,8 @@ struct ConnectionDetailView: View {
                             updateInfo: info.updateInfo,
                             uptimeInfo: info.uptimeInfo,
                             updateRecordedAt: info.updateRecordedAt,
+                            isManualEntry: false,
+                            isEdited: false,
                             recordedAt: info.recordedAt
                         ),
                         at: 0
@@ -742,6 +747,151 @@ struct ConnectionDetailView: View {
 
     private func deleteSnapshot(id: SystemInfoSnapshot.ID) {
         draft.systemInfoHistory.removeAll { $0.id == id }
+    }
+
+}
+
+struct ConnectionInfoEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    @Binding var connection: SSHConnection
+    let installedApps: [InstalledTerminalApp]
+    let chooseApplication: () -> Void
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    var body: some View {
+        Form {
+            Section(t("连接信息", "Connection")) {
+                TextField(t("名称", "Name"), text: $connection.name)
+                Toggle(t("标记为本地", "Mark as Local"), isOn: $connection.isLocal)
+
+                if !connection.isLocal {
+                    TextField(t("主机", "Host"), text: $connection.host)
+                    TextField(t("用户名", "Username"), text: $connection.username)
+                    TextField(t("端口", "Port"), value: $connection.port, format: .number)
+                }
+            }
+
+            Section(t("打开方式", "Open With")) {
+                Picker(t("已安装应用", "Installed Apps"), selection: $connection.preferredAppPath) {
+                    Text(t("系统默认", "System Default")).tag("")
+                    ForEach(installedApps) { app in
+                        Text(app.name).tag(app.path)
+                    }
+                }
+
+                HStack {
+                    Button(t("选择应用", "Choose Application")) {
+                        chooseApplication()
+                    }
+                    if !connection.preferredAppPath.isEmpty {
+                        Button(t("清除", "Clear")) {
+                            connection.preferredAppPath = ""
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(width: 520, height: 420)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(t("完成", "Done")) {
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+
+struct NotesEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    @Binding var notesEntries: [NoteEntry]
+    @State private var newNote = ""
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                TextField(t("新备注", "New Note"), text: $newNote)
+                Button(t("添加", "Add")) {
+                    let trimmed = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    notesEntries.insert(NoteEntry(content: trimmed), at: 0)
+                    newNote = ""
+                }
+            }
+
+            List {
+                ForEach(notesEntries.sorted { $0.createdAt > $1.createdAt }) { note in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(note.content)
+                        Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .contextMenu {
+                        Button(t("删除", "Delete"), role: .destructive) {
+                            notesEntries.removeAll { $0.id == note.id }
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(width: 560, height: 420)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(t("完成", "Done")) {
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+
+struct SystemHistoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    @State private var snapshot: SystemInfoSnapshot
+    let title: String
+    let onSave: (SystemInfoSnapshot) -> Void
+
+    init(snapshot: SystemInfoSnapshot, title: String, onSave: @escaping (SystemInfoSnapshot) -> Void) {
+        self._snapshot = State(initialValue: snapshot)
+        self.title = title
+        self.onSave = onSave
+    }
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    var body: some View {
+        Form {
+            TextField(t("内核版本", "Kernel Version"), text: $snapshot.kernelVersion)
+            TextField(t("最后更新信息", "Last Update Info"), text: $snapshot.updateInfo)
+            TextField(t("运行时间", "Uptime"), text: $snapshot.uptimeInfo)
+        }
+        .padding()
+        .frame(width: 520, height: 320)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(t("保存", "Save")) {
+                    snapshot.isEdited = true
+                    onSave(snapshot)
+                    dismiss()
+                }
+            }
+        }
+        .navigationTitle(title)
     }
 }
 
