@@ -98,16 +98,18 @@ struct ContentView: View {
                                                 }
                                             }
                                     } else {
+                                        let isSelected = selectedID == connection.id
                                         VStack(alignment: .leading, spacing: 4) {
                                             HStack(spacing: 6) {
                                                 Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
                                                     .font(.headline)
+                                                    .foregroundStyle(isSelected ? .primary : .primary)
                                                     .lineLimit(1)
                                                     .truncationMode(.tail)
 
                                                 Text(maskedHostText(for: connection))
                                                     .font(.subheadline)
-                                                    .foregroundStyle(.secondary)
+                                                    .foregroundStyle(isSelected ? Color.primary.opacity(0.8) : Color.secondary)
                                                     .lineLimit(1)
                                                     .truncationMode(.middle)
                                             }
@@ -116,7 +118,7 @@ struct ContentView: View {
                                                !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                                 Text(latest.kernelVersion)
                                                     .font(.caption)
-                                                    .foregroundStyle(.tertiary)
+                                                    .foregroundStyle(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.78))
                                                     .lineLimit(1)
                                             }
 
@@ -128,9 +130,16 @@ struct ContentView: View {
 
                                                     Text(status.label)
                                                         .font(.caption2)
-                                                        .foregroundStyle(status.color)
+                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.82) : status.color)
                                                         .lineLimit(1)
                                                 }
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    Capsule(style: .continuous)
+                                                        .fill(isSelected ? Color.primary.opacity(0.10) : status.color.opacity(0.12))
+                                                )
+                                                .fixedSize(horizontal: true, vertical: false)
                                             }
                                         }
                                         .padding(.vertical, 4)
