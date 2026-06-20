@@ -633,15 +633,16 @@ struct ConnectionDetailView: View {
                         }
                     }
 
-                    if !draft.isLocal, let url = draft.sshURL {
-                        Label(url.absoluteString, systemImage: "link")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+                    Label(heroConnectionDetailText, systemImage: draft.isLocal ? "desktopcomputer" : "link")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .frame(minHeight: 48, alignment: .topLeading)
             }
 
             Spacer()
@@ -682,6 +683,14 @@ struct ConnectionDetailView: View {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08))
         )
+    }
+
+    private var heroConnectionDetailText: String {
+        if draft.isLocal {
+            return t("直接打开本机终端", "Open local terminal directly")
+        }
+
+        return draft.sshURL?.absoluteString ?? t("SSH 地址不可用", "SSH URL unavailable")
     }
 
     private func detailCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
