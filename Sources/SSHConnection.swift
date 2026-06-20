@@ -105,6 +105,61 @@ struct SystemInfoSnapshot: Identifiable, Codable, Hashable {
     }
 }
 
+struct HardwareInfo: Identifiable, Codable, Hashable {
+    var id: UUID
+    var osName: String
+    var architecture: String
+    var cpuModel: String
+    var cpuCores: String
+    var memoryTotal: String
+    var recordedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        osName: String = "",
+        architecture: String = "",
+        cpuModel: String = "",
+        cpuCores: String = "",
+        memoryTotal: String = "",
+        recordedAt: Date = .now
+    ) {
+        self.id = id
+        self.osName = osName
+        self.architecture = architecture
+        self.cpuModel = cpuModel
+        self.cpuCores = cpuCores
+        self.memoryTotal = memoryTotal
+        self.recordedAt = recordedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case osName
+        case architecture
+        case cpuModel
+        case cpuCores
+        case memoryTotal
+        case recordedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        osName = try container.decodeIfPresent(String.self, forKey: .osName) ?? ""
+        architecture = try container.decodeIfPresent(String.self, forKey: .architecture) ?? ""
+        cpuModel = try container.decodeIfPresent(String.self, forKey: .cpuModel) ?? ""
+        cpuCores = try container.decodeIfPresent(String.self, forKey: .cpuCores) ?? ""
+        memoryTotal = try container.decodeIfPresent(String.self, forKey: .memoryTotal) ?? ""
+        recordedAt = try container.decodeIfPresent(Date.self, forKey: .recordedAt) ?? .now
+    }
+
+    var hasVisibleContent: Bool {
+        [osName, architecture, cpuModel, cpuCores, memoryTotal].contains {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+}
+
 struct SSHConnection: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
@@ -115,6 +170,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var noteSortMode: NoteSortMode
     var notesEntries: [NoteEntry]
     var systemInfoHistory: [SystemInfoSnapshot]
+    var hardwareInfo: HardwareInfo?
     var preferredAppPath: String
     var itemKind: SSHSidebarItemKind
     var manualOrder: Int
@@ -131,6 +187,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case noteSortMode
         case notesEntries
         case systemInfoHistory
+        case hardwareInfo
         case preferredAppPath
         case itemKind
         case manualOrder
@@ -148,6 +205,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         noteSortMode: NoteSortMode = .time,
         notesEntries: [NoteEntry] = [],
         systemInfoHistory: [SystemInfoSnapshot] = [],
+        hardwareInfo: HardwareInfo? = nil,
         preferredAppPath: String = "",
         itemKind: SSHSidebarItemKind = .connection,
         manualOrder: Int = 0,
@@ -163,6 +221,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.noteSortMode = noteSortMode
         self.notesEntries = notesEntries
         self.systemInfoHistory = systemInfoHistory
+        self.hardwareInfo = hardwareInfo
         self.preferredAppPath = preferredAppPath
         self.itemKind = itemKind
         self.manualOrder = manualOrder
@@ -186,6 +245,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         systemInfoHistory = try container.decodeIfPresent([SystemInfoSnapshot].self, forKey: .systemInfoHistory) ?? []
+        hardwareInfo = try container.decodeIfPresent(HardwareInfo.self, forKey: .hardwareInfo)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -199,6 +259,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(noteSortMode, forKey: .noteSortMode)
         try container.encode(notesEntries, forKey: .notesEntries)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
+        try container.encodeIfPresent(hardwareInfo, forKey: .hardwareInfo)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
         try container.encode(itemKind, forKey: .itemKind)
         try container.encode(manualOrder, forKey: .manualOrder)

@@ -26,6 +26,30 @@ enum RemoteSystemInfoError: LocalizedError {
 }
 
 enum RemoteSystemInfoService {
+    static func fetchHardware(for connection: SSHConnection) async throws -> HardwareInfo {
+        if connection.isLocal {
+            return try fetchLocalHardware()
+        }
+
+        let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            throw RemoteSystemInfoError.invalidHost
+        }
+
+        let sshPath = "/usr/bin/ssh"
+        guard FileManager.default.isExecutableFile(atPath: sshPath) else {
+            throw RemoteSystemInfoError.sshUnavailable
+        }
+
+        let output = try runProcess(
+            executablePath: sshPath,
+            arguments: sshArguments(for: connection) + [hardwareCommand],
+            environment: try askpassEnvironment(for: connection),
+            defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
+        )
+        return parseHardwareOutput(output)
+    }
+
     static func fetch(for connection: SSHConnection) async throws -> RemoteSystemInfo {
         if connection.isLocal {
             return try fetchLocal()
@@ -89,6 +113,16 @@ enum RemoteSystemInfoService {
         return parseRemoteSystemInfoOutput(output)
     }
 
+    private static func fetchLocalHardware() throws -> HardwareInfo {
+        let output = try runProcess(
+            executablePath: "/bin/zsh",
+            arguments: ["-lc", hardwareCommand],
+            environment: ProcessInfo.processInfo.environment,
+            defaultErrorMessage: "本地命令执行失败。"
+        )
+        return parseHardwareOutput(output)
+    }
+
     private static func fetchLocal() throws -> RemoteSystemInfo {
         let localCommand = #"""
         printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
@@ -127,12 +161,7 @@ enum RemoteSystemInfoService {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let values = Dictionary(uniqueKeysWithValues: lines.compactMap { line -> (String, String)? in
-            guard let separatorIndex = line.firstIndex(of: "=") else { return nil }
-            let key = String(line[..<separatorIndex])
-            let value = String(line[line.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            return (key, value)
-        })
+        let values = parseKeyValueLines(lines)
 
         let kernelVersion = values["KERNEL", default: "Unknown"]
         let rawUpdateInfo = values["UPDATE", default: ""]
@@ -149,6 +178,33 @@ enum RemoteSystemInfoService {
             updateRecordedAt: updateRecordedAt,
             recordedAt: .now
         )
+    }
+
+    private static func parseHardwareOutput(_ output: String) -> HardwareInfo {
+        let lines = output
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let values = parseKeyValueLines(lines)
+        let memoryTotal = values["MEM_BYTES"].flatMap { Int64($0) }.map(formatBytes) ?? ""
+
+        return HardwareInfo(
+            osName: values["OS", default: ""],
+            architecture: values["ARCH", default: ""],
+            cpuModel: values["CPU_MODEL", default: ""],
+            cpuCores: values["CPU_CORES", default: ""],
+            memoryTotal: memoryTotal,
+            recordedAt: .now
+        )
+    }
+
+    private static func parseKeyValueLines(_ lines: [String]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: lines.compactMap { line -> (String, String)? in
+            guard let separatorIndex = line.firstIndex(of: "=") else { return nil }
+            let key = String(line[..<separatorIndex])
+            let value = String(line[line.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (key, value)
+        })
     }
 
     private static func runProcess(
@@ -284,6 +340,73 @@ enum RemoteSystemInfoService {
         if hours > 0 { parts.append("\(hours)h") }
         if minutes > 0 || parts.isEmpty { parts.append("\(minutes)m") }
         return parts.joined(separator: " ")
+    }
+
+    private static func formatBytes(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "" }
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var value = Double(bytes)
+        var unitIndex = 0
+        while value >= 1024, unitIndex < units.count - 1 {
+            value /= 1024
+            unitIndex += 1
+        }
+
+        if value >= 10 || unitIndex == 0 {
+            return "\(Int(value.rounded())) \(units[unitIndex])"
+        }
+        return String(format: "%.1f %@", value, units[unitIndex])
+    }
+
+    private static var hardwareCommand: String {
+        #"""
+        os_name=""
+        if [ -r /etc/os-release ]; then
+            os_name=$(awk -F= '/^PRETTY_NAME=/ {gsub(/^"|"$/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
+        fi
+        if [ -z "$os_name" ] && command -v sw_vers >/dev/null 2>&1; then
+            os_name="$(sw_vers -productName 2>/dev/null) $(sw_vers -productVersion 2>/dev/null)"
+        fi
+        if [ -z "$os_name" ]; then
+            os_name=$(uname -sr 2>/dev/null)
+        fi
+        printf 'OS=%s\n' "$os_name"
+
+        printf 'ARCH=%s\n' "$(uname -m 2>/dev/null)"
+
+        cpu_model=""
+        if command -v sysctl >/dev/null 2>&1; then
+            cpu_model=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
+        fi
+        if [ -z "$cpu_model" ] && [ -r /proc/cpuinfo ]; then
+            cpu_model=$(awk -F: '/model name|Hardware|Processor/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
+        fi
+        if [ -z "$cpu_model" ] && command -v lscpu >/dev/null 2>&1; then
+            cpu_model=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+        fi
+        printf 'CPU_MODEL=%s\n' "$cpu_model"
+
+        cpu_cores=""
+        if command -v nproc >/dev/null 2>&1; then
+            cpu_cores=$(nproc 2>/dev/null)
+        fi
+        if [ -z "$cpu_cores" ] && command -v getconf >/dev/null 2>&1; then
+            cpu_cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null)
+        fi
+        if [ -z "$cpu_cores" ] && command -v sysctl >/dev/null 2>&1; then
+            cpu_cores=$(sysctl -n hw.ncpu 2>/dev/null)
+        fi
+        printf 'CPU_CORES=%s\n' "$cpu_cores"
+
+        mem_bytes=""
+        if [ -r /proc/meminfo ]; then
+            mem_bytes=$(awk '/MemTotal/ {printf "%.0f", $2 * 1024; exit}' /proc/meminfo 2>/dev/null)
+        fi
+        if [ -z "$mem_bytes" ] && command -v sysctl >/dev/null 2>&1; then
+            mem_bytes=$(sysctl -n hw.memsize 2>/dev/null || sysctl -n hw.physmem 2>/dev/null || true)
+        fi
+        printf 'MEM_BYTES=%s\n' "$mem_bytes"
+        """#
     }
 
 

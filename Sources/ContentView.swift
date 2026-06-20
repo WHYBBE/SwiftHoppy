@@ -412,6 +412,7 @@ struct ConnectionDetailView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
+    @State private var isFetchingHardwareInfo = false
     @State private var fetchErrorMessage = ""
     @State private var showConnectionEditor = false
     @State private var creatingNote = false
@@ -460,6 +461,10 @@ struct ConnectionDetailView: View {
                 HStack(alignment: .top, spacing: 18) {
                     ScrollView {
                         VStack(spacing: 16) {
+                            if let hardwareInfo = draft.hardwareInfo, hardwareInfo.hasVisibleContent {
+                                hardwareInfoCard(hardwareInfo)
+                            }
+
                             if draft.notesEntries.isEmpty {
                                 detailCard(title: t("备注", "Notes"), icon: "note.text") {
                                     Text(t("暂无备注。", "No notes yet."))
@@ -665,6 +670,11 @@ struct ConnectionDetailView: View {
                 .buttonStyle(.borderedProminent)
 
                 Menu {
+                    Button(isFetchingHardwareInfo ? t("正在获取硬件信息...", "Reading Hardware Info...") : t("获取硬件信息", "Read Hardware Info")) {
+                        refreshHardwareInfo()
+                    }
+                    .disabled(isFetchingHardwareInfo)
+
                     Button(t("排序备注", "Sort Notes")) {
                         showNoteSortEditor = true
                     }
@@ -715,6 +725,110 @@ struct ConnectionDetailView: View {
                 .strokeBorder(Color.primary.opacity(0.08))
         )
         .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+    }
+
+    private func hardwareInfoCard(_ info: HardwareInfo) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center) {
+                Label(t("硬件信息", "Hardware Info"), systemImage: "cpu")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Menu {
+                    Button(isFetchingHardwareInfo ? t("正在更新...", "Updating...") : t("更新", "Update")) {
+                        refreshHardwareInfo()
+                    }
+                    .disabled(isFetchingHardwareInfo)
+
+                    Button(t("删除显示", "Remove Display"), role: .destructive) {
+                        draft.hardwareInfo = nil
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            if !info.cpuModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("CPU")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(info.cpuModel)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+            }
+
+            HStack(spacing: 10) {
+                if !info.cpuCores.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    hardwareMetricCard(title: t("核心", "Cores"), value: info.cpuCores, icon: "cpu")
+                }
+                if !info.memoryTotal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    hardwareMetricCard(title: t("内存", "Memory"), value: info.memoryTotal, icon: "memorychip")
+                }
+                if !info.architecture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    hardwareMetricCard(title: t("架构", "Arch"), value: info.architecture, icon: "rectangle.3.group")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                if !info.osName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    hardwareDetailLine(title: t("系统", "System"), value: info.osName)
+                }
+
+                hardwareDetailLine(title: t("获取时间", "Read At"), value: info.recordedAt.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.18))
+        )
+        .shadow(color: .black.opacity(0.05), radius: 12, x: 0, y: 5)
+    }
+
+    private func hardwareMetricCard(title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(value)
+                .font(.title3.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+    }
+
+    private func hardwareDetailLine(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 54, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func detailSummaryRow(title: String, value: String) -> some View {
@@ -829,6 +943,27 @@ struct ConnectionDetailView: View {
                 await MainActor.run {
                     fetchErrorMessage = error.localizedDescription
                     isFetchingSystemInfo = false
+                }
+            }
+        }
+    }
+
+    private func refreshHardwareInfo() {
+        let snapshot = draft
+        isFetchingHardwareInfo = true
+        fetchErrorMessage = ""
+
+        Task {
+            do {
+                let info = try await RemoteSystemInfoService.fetchHardware(for: snapshot)
+                await MainActor.run {
+                    draft.hardwareInfo = info
+                    isFetchingHardwareInfo = false
+                }
+            } catch {
+                await MainActor.run {
+                    fetchErrorMessage = error.localizedDescription
+                    isFetchingHardwareInfo = false
                 }
             }
         }
