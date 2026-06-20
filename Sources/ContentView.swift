@@ -472,33 +472,7 @@ struct ConnectionDetailView: View {
                                 }
                             } else {
                                 ForEach(sortedNotes) { note in
-                                    detailCard(title: t("备注", "Note"), icon: "note.text") {
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            Text(note.content)
-                                                .font(.body)
-                                                .multilineTextAlignment(.leading)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                            HStack {
-                                                Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                                Spacer()
-                                                Button(t("编辑", "Edit")) {
-                                                    editingNote = note
-                                                }
-                                                .buttonStyle(.link)
-                                                Menu {
-                                                    Button(t("删除", "Delete"), role: .destructive) {
-                                                        draft.notesEntries.removeAll { $0.id == note.id }
-                                                    }
-                                                } label: {
-                                                    Image(systemName: "ellipsis.circle")
-                                                }
-                                                .menuStyle(.borderlessButton)
-                                            }
-                                        }
-                                    }
+                                    noteCard(note)
                                 }
                             }
                         }
@@ -713,6 +687,51 @@ struct ConnectionDetailView: View {
                 .foregroundStyle(.primary)
 
             content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+    }
+
+    private func noteCard(_ note: NoteEntry) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Label(t("备注", "Note"), systemImage: "note.text")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Menu {
+                    Button(t("编辑", "Edit")) {
+                        editingNote = note
+                    }
+
+                    Button(t("删除", "Delete"), role: .destructive) {
+                        draft.notesEntries.removeAll { $0.id == note.id }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            Text(note.content)
+                .font(.body)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
