@@ -482,54 +482,8 @@ struct ConnectionDetailView: View {
                     .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
 
                     VStack(alignment: .leading, spacing: 16) {
-                        detailCard(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
-                            VStack(alignment: .leading, spacing: 14) {
-                                HStack {
-                                    Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
-                                        refreshRemoteSystemInfo()
-                                    }
-                                    .disabled(isFetchingSystemInfo)
-
-                                    Button(t("新建手填", "New Manual Entry")) {
-                                        creatingManualSnapshot = true
-                                    }
-                                }
-
-                                Text(draft.isLocal ? t("本地模式下会执行本机命令读取系统历史。", "In local mode, system history is read from local commands.") : t("每次读取都会追加一条新的系统历史。", "Each read adds a new system history entry."))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-
-                                if draft.systemInfoHistory.isEmpty {
-                                    VStack(spacing: 10) {
-                                        Image(systemName: "clock.badge.questionmark")
-                                            .font(.system(size: 28, weight: .medium))
-                                            .foregroundStyle(.secondary)
-                                        Text(t("暂无系统信息历史。", "No system history yet."))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .frame(maxWidth: .infinity, minHeight: 240)
-                                } else {
-                                    ScrollView {
-                                        VStack(spacing: 12) {
-                                            ForEach(draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }) { snapshot in
-                                                snapshotCard(snapshot: snapshot)
-                                                    .contextMenu {
-                                                        Button(t("编辑", "Edit")) {
-                                                            editingSnapshot = snapshot
-                                                        }
-                                                        Button(t("删除", "Delete"), role: .destructive) {
-                                                            deleteSnapshot(id: snapshot.id)
-                                                        }
-                                                    }
-                                            }
-                                        }
-                                        .padding(cardShadowOutset)
-                                    }
-                                    .padding(-cardShadowOutset)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        systemHistoryCard
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                     .frame(minWidth: 280, idealWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
@@ -848,6 +802,72 @@ struct ConnectionDetailView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var systemHistoryCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Label(t("系统历史", "System History"), systemImage: "clock.arrow.circlepath")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Menu {
+                    Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
+                        refreshRemoteSystemInfo()
+                    }
+                    .disabled(isFetchingSystemInfo)
+
+                    Button(t("新建手填", "New Manual Entry")) {
+                        creatingManualSnapshot = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            if draft.systemInfoHistory.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "clock.badge.questionmark")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(t("暂无系统信息历史。", "No system history yet."))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 240)
+            } else {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }) { snapshot in
+                            snapshotCard(snapshot: snapshot)
+                                .contextMenu {
+                                    Button(t("编辑", "Edit")) {
+                                        editingSnapshot = snapshot
+                                    }
+                                    Button(t("删除", "Delete"), role: .destructive) {
+                                        deleteSnapshot(id: snapshot.id)
+                                    }
+                                }
+                        }
+                    }
+                    .padding(cardShadowOutset)
+                }
+                .padding(-cardShadowOutset)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
     }
 
     private func detailSummaryRow(title: String, value: String) -> some View {
