@@ -425,6 +425,7 @@ struct ConnectionDetailView: View {
     let onOpen: (SSHConnection) -> Void
     let errorMessage: String
     let onDismissError: () -> Void
+    private let cardShadowOutset: CGFloat = 12
 
     init(
         connection: SSHConnection,
@@ -496,9 +497,9 @@ struct ConnectionDetailView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 2)
+                        .padding(cardShadowOutset)
                     }
+                    .padding(-cardShadowOutset)
                     .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
 
                     VStack(alignment: .leading, spacing: 16) {
@@ -543,7 +544,9 @@ struct ConnectionDetailView: View {
                                                     }
                                             }
                                         }
+                                        .padding(cardShadowOutset)
                                     }
+                                    .padding(-cardShadowOutset)
                                 }
                             }
                         }
