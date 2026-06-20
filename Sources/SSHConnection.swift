@@ -5,21 +5,29 @@ enum SSHSidebarItemKind: String, Codable {
     case separator
 }
 
+enum NoteSortMode: String, Codable {
+    case manual
+    case time
+}
+
 struct NoteEntry: Identifiable, Codable, Hashable {
     var id: UUID
     var content: String
     var createdAt: Date
+    var manualOrder: Int
 
-    init(id: UUID = UUID(), content: String = "", createdAt: Date = .now) {
+    init(id: UUID = UUID(), content: String = "", createdAt: Date = .now, manualOrder: Int = 0) {
         self.id = id
         self.content = content
         self.createdAt = createdAt
+        self.manualOrder = manualOrder
     }
 
     enum CodingKeys: String, CodingKey {
         case id
         case content
         case createdAt
+        case manualOrder
     }
 
     init(from decoder: Decoder) throws {
@@ -27,6 +35,7 @@ struct NoteEntry: Identifiable, Codable, Hashable {
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+        manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
     }
 }
 
@@ -103,6 +112,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var port: Int
     var username: String
     var isLocal: Bool
+    var noteSortMode: NoteSortMode
     var notesEntries: [NoteEntry]
     var systemInfoHistory: [SystemInfoSnapshot]
     var preferredAppPath: String
@@ -118,6 +128,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case port
         case username
         case isLocal
+        case noteSortMode
         case notesEntries
         case systemInfoHistory
         case preferredAppPath
@@ -134,6 +145,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         port: Int = 22,
         username: String = "",
         isLocal: Bool = false,
+        noteSortMode: NoteSortMode = .time,
         notesEntries: [NoteEntry] = [],
         systemInfoHistory: [SystemInfoSnapshot] = [],
         preferredAppPath: String = "",
@@ -148,6 +160,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.port = port
         self.username = username
         self.isLocal = isLocal
+        self.noteSortMode = noteSortMode
         self.notesEntries = notesEntries
         self.systemInfoHistory = systemInfoHistory
         self.preferredAppPath = preferredAppPath
@@ -165,6 +178,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
         username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
         isLocal = try container.decodeIfPresent(Bool.self, forKey: .isLocal) ?? false
+        noteSortMode = try container.decodeIfPresent(NoteSortMode.self, forKey: .noteSortMode) ?? .time
         notesEntries = try container.decodeIfPresent([NoteEntry].self, forKey: .notesEntries) ?? []
         preferredAppPath = try container.decodeIfPresent(String.self, forKey: .preferredAppPath) ?? ""
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
@@ -182,6 +196,7 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(port, forKey: .port)
         try container.encode(username, forKey: .username)
         try container.encode(isLocal, forKey: .isLocal)
+        try container.encode(noteSortMode, forKey: .noteSortMode)
         try container.encode(notesEntries, forKey: .notesEntries)
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)

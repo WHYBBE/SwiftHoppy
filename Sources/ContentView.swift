@@ -369,7 +369,9 @@ struct ConnectionDetailView: View {
     @State private var isFetchingSystemInfo = false
     @State private var fetchErrorMessage = ""
     @State private var showConnectionEditor = false
-    @State private var showNotesEditor = false
+    @State private var creatingNote = false
+    @State private var showNoteSortEditor = false
+    @State private var editingNote: NoteEntry?
     @State private var editingSnapshot: SystemInfoSnapshot?
     @State private var creatingManualSnapshot = false
     let installedApps: [InstalledTerminalApp]
@@ -412,35 +414,45 @@ struct ConnectionDetailView: View {
                 HStack(alignment: .top, spacing: 18) {
                     ScrollView {
                         VStack(spacing: 16) {
-                            detailCard(title: t("备注", "Notes"), icon: "note.text") {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    if draft.notesEntries.isEmpty {
-                                        Text(t("暂无备注。", "No notes yet."))
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        ForEach(draft.notesEntries.sorted { $0.createdAt > $1.createdAt }) { note in
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                Text(note.content)
-                                                    .font(.body)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            if draft.notesEntries.isEmpty {
+                                detailCard(title: t("备注", "Notes"), icon: "note.text") {
+                                    Text(t("暂无备注。", "No notes yet."))
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else {
+                                ForEach(sortedNotes) { note in
+                                    detailCard(title: t("备注", "Note"), icon: "note.text") {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text(note.content)
+                                                .font(.body)
+                                                .multilineTextAlignment(.leading)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                            HStack {
                                                 Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
+                                                Spacer()
+                                                Button(t("编辑", "Edit")) {
+                                                    editingNote = note
+                                                }
+                                                .buttonStyle(.link)
+                                                Menu {
+                                                    Button(t("删除", "Delete"), role: .destructive) {
+                                                        draft.notesEntries.removeAll { $0.id == note.id }
+                                                    }
+                                                } label: {
+                                                    Image(systemName: "ellipsis.circle")
+                                                }
+                                                .menuStyle(.borderlessButton)
                                             }
-                                            .padding(10)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                    .fill(Color.primary.opacity(0.04))
-                                            )
                                         }
-                                    }
-
-                                    Button(t("管理备注", "Manage Notes")) {
-                                        showNotesEditor = true
                                     }
                                 }
                             }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 2)
                     }
                     .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
 
@@ -520,8 +532,20 @@ struct ConnectionDetailView: View {
         .sheet(isPresented: $showConnectionEditor) {
             ConnectionInfoEditorView(connection: $draft, installedApps: installedApps, chooseApplication: chooseApplication)
         }
-        .sheet(isPresented: $showNotesEditor) {
-            NotesEditorView(notesEntries: $draft.notesEntries)
+        .sheet(isPresented: $creatingNote) {
+            NoteEditorView(note: NoteEntry(manualOrder: (draft.notesEntries.map(\ .manualOrder).max() ?? -1) + 1), title: t("新建备注", "New Note")) { newNote in
+                draft.notesEntries.insert(newNote, at: 0)
+            }
+        }
+        .sheet(isPresented: $showNoteSortEditor) {
+            NoteSortEditorView(connection: $draft)
+        }
+        .sheet(item: $editingNote) { note in
+            NoteEditorView(note: note, title: t("编辑备注", "Edit Note")) { updatedNote in
+                if let index = draft.notesEntries.firstIndex(where: { $0.id == updatedNote.id }) {
+                    draft.notesEntries[index] = updatedNote
+                }
+            }
         }
         .sheet(item: $editingSnapshot) { snapshot in
             SystemHistoryEditorView(snapshot: snapshot, title: t("编辑系统历史", "Edit System History")) { updatedSnapshot in
@@ -583,7 +607,7 @@ struct ConnectionDetailView: View {
                 }
 
                 Button(t("添加备注", "Add Note")) {
-                    showNotesEditor = true
+                    creatingNote = true
                 }
 
                 Button(draft.isLocal ? t("打开终端", "Open Terminal") : t("打开 SSH", "Open SSH")) {
@@ -591,8 +615,16 @@ struct ConnectionDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
-                Button(t("删除", "Delete"), role: .destructive) {
-                    onDelete()
+                Menu {
+                    Button(t("排序备注", "Sort Notes")) {
+                        showNoteSortEditor = true
+                    }
+
+                    Button(t("删除", "Delete"), role: .destructive) {
+                        onDelete()
+                    }
+                } label: {
+                    Label(t("更多", "More"), systemImage: "ellipsis.circle")
                 }
             }
         }
@@ -625,7 +657,7 @@ struct ConnectionDetailView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08))
         )
-        .shadow(color: .black.opacity(0.05), radius: 16, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
     }
 
     private func detailSummaryRow(title: String, value: String) -> some View {
@@ -749,6 +781,20 @@ struct ConnectionDetailView: View {
         draft.systemInfoHistory.removeAll { $0.id == id }
     }
 
+    private var sortedNotes: [NoteEntry] {
+        switch draft.noteSortMode {
+        case .manual:
+            return draft.notesEntries.sorted {
+                if $0.manualOrder == $1.manualOrder {
+                    return $0.createdAt > $1.createdAt
+                }
+                return $0.manualOrder < $1.manualOrder
+            }
+        case .time:
+            return draft.notesEntries.sorted { $0.createdAt > $1.createdAt }
+        }
+    }
+
 }
 
 struct ConnectionInfoEditorView: View {
@@ -807,11 +853,18 @@ struct ConnectionInfoEditorView: View {
     }
 }
 
-struct NotesEditorView: View {
+struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: AppPreferencesStore
-    @Binding var notesEntries: [NoteEntry]
-    @State private var newNote = ""
+    @State private var note: NoteEntry
+    let title: String
+    let onSave: (NoteEntry) -> Void
+
+    init(note: NoteEntry, title: String, onSave: @escaping (NoteEntry) -> Void) {
+        self._note = State(initialValue: note)
+        self.title = title
+        self.onSave = onSave
+    }
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
@@ -819,34 +872,60 @@ struct NotesEditorView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            HStack {
-                TextField(t("新备注", "New Note"), text: $newNote)
-                Button(t("添加", "Add")) {
-                    let trimmed = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    notesEntries.insert(NoteEntry(content: trimmed), at: 0)
-                    newNote = ""
+            TextEditor(text: $note.content)
+                .frame(minHeight: 220)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
+                )
+        }
+        .padding()
+        .frame(width: 560, height: 340)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(t("保存", "Save")) {
+                    onSave(note)
+                    dismiss()
                 }
             }
+        }
+        .navigationTitle(title)
+    }
+}
+
+struct NoteSortEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    @Binding var connection: SSHConnection
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Picker(t("排序模式", "Sort Mode"), selection: $connection.noteSortMode) {
+                Text(t("手动", "Manual")).tag(NoteSortMode.manual)
+                Text(t("时间", "Time")).tag(NoteSortMode.time)
+            }
+            .pickerStyle(.segmented)
 
             List {
-                ForEach(notesEntries.sorted { $0.createdAt > $1.createdAt }) { note in
+                ForEach(sortedNotes) { note in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(note.content)
+                            .lineLimit(2)
                         Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .contextMenu {
-                        Button(t("删除", "Delete"), role: .destructive) {
-                            notesEntries.removeAll { $0.id == note.id }
-                        }
-                    }
                 }
+                .onMove(perform: connection.noteSortMode == .manual ? moveNotes : nil)
             }
         }
         .padding()
-        .frame(width: 560, height: 420)
+        .frame(width: 560, height: 480)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(t("完成", "Done")) {
@@ -854,6 +933,30 @@ struct NotesEditorView: View {
                 }
             }
         }
+    }
+
+    private var sortedNotes: [NoteEntry] {
+        switch connection.noteSortMode {
+        case .manual:
+            return connection.notesEntries.sorted {
+                if $0.manualOrder == $1.manualOrder {
+                    return $0.createdAt > $1.createdAt
+                }
+                return $0.manualOrder < $1.manualOrder
+            }
+        case .time:
+            return connection.notesEntries.sorted { $0.createdAt > $1.createdAt }
+        }
+    }
+
+    private func moveNotes(from source: IndexSet, to destination: Int) {
+        guard connection.noteSortMode == .manual else { return }
+        var notes = sortedNotes
+        notes.move(fromOffsets: source, toOffset: destination)
+        for index in notes.indices {
+            notes[index].manualOrder = index
+        }
+        connection.notesEntries = notes
     }
 }
 
