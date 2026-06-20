@@ -39,24 +39,8 @@ struct ContentView: View {
                         sidebarEmptyState
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        VStack(spacing: 10) {
-                            HStack {
-                                Label(t("排序", "Sort"), systemImage: "arrow.up.arrow.down")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                Spacer(minLength: 8)
-
-                                if preferences.connectionSortMode == .manual {
-                                    Button {
-                                        _ = store.addSeparator()
-                                    } label: {
-                                        Image(systemName: "line.3.horizontal")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .help(t("新增分割线", "Add Divider"))
-                                }
-
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
                                 Menu {
                                     Button(t("手动", "Manual")) {
                                         preferences.setConnectionSortMode(.manual)
@@ -68,19 +52,38 @@ struct ContentView: View {
                                         preferences.setConnectionSortMode(.ip)
                                     }
                                 } label: {
-                                    HStack(spacing: 6) {
-                                        Text(sortModeLabel)
-                                        Image(systemName: "chevron.up.chevron.down")
-                                            .font(.caption2)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(Color.primary.opacity(0.06))
-                                    )
+                                    Label(sortModeLabel, systemImage: "arrow.up.arrow.down")
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .fill(Color.primary.opacity(0.06))
+                                        )
                                 }
                                 .menuStyle(.borderlessButton)
+
+                                Toggle(isOn: Binding(
+                                    get: { preferences.hidesSensitiveInfo },
+                                    set: { preferences.setHidesSensitiveInfo($0) }
+                                )) {
+                                    Image(systemName: preferences.hidesSensitiveInfo ? "eye.slash" : "eye")
+                                        .frame(width: 14)
+                                }
+                                .toggleStyle(.button)
+                                .frame(width: 32, height: 32)
+                                .help(t("隐藏左侧栏中的 IP 等关键信息", "Hide IP and other sensitive details in the sidebar"))
+
+                                Spacer(minLength: 4)
+
+                                if preferences.connectionSortMode == .manual {
+                                    Button {
+                                        _ = store.addSeparator()
+                                    } label: {
+                                        Image(systemName: "line.3.horizontal")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help(t("新增分割线", "Add Divider"))
+                                }
                             }
                             .padding(.horizontal, 12)
                             .padding(.top, 8)
@@ -96,14 +99,18 @@ struct ContentView: View {
                                             }
                                     } else {
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                                                .font(.headline)
-                                                .lineLimit(1)
+                                            HStack(spacing: 6) {
+                                                Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
+                                                    .font(.headline)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.tail)
 
-                                            Text(connection.host)
-                                                .font(.subheadline)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
+                                                Text(maskedHostText(for: connection))
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                            }
 
                                             if let latest = connection.latestSystemInfo,
                                                !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -247,6 +254,35 @@ struct ContentView: View {
         case .ip:
             return "IP"
         }
+    }
+
+    private func maskedHostText(for connection: SSHConnection) -> String {
+        if connection.isLocal {
+            return t("本机", "Local")
+        }
+
+        let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard preferences.hidesSensitiveInfo else {
+            return host
+        }
+        guard !host.isEmpty else {
+            return t("未填写主机", "No host")
+        }
+
+        return partiallyMasked(host)
+    }
+
+    private func partiallyMasked(_ value: String) -> String {
+        guard value.count > 4 else {
+            return String(repeating: "•", count: value.count)
+        }
+
+        let visiblePrefixCount = min(3, max(1, value.count / 4))
+        let visibleSuffixCount = min(3, max(1, value.count / 4))
+        let maskCount = max(2, value.count - visiblePrefixCount - visibleSuffixCount)
+        let prefix = String(value.prefix(visiblePrefixCount))
+        let suffix = String(value.suffix(visibleSuffixCount))
+        return prefix + String(repeating: "•", count: maskCount) + suffix
     }
 
     private func deleteConnections(at offsets: IndexSet) {

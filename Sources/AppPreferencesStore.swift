@@ -45,6 +45,7 @@ struct TerminalAppCache: Codable {
     var language: AppLanguage
     var theme: AppTheme
     var connectionSortMode: ConnectionSortMode
+    var hidesSensitiveInfo: Bool
 }
 
 @MainActor
@@ -58,6 +59,9 @@ final class AppPreferencesStore: ObservableObject {
         didSet { save() }
     }
     @Published var connectionSortMode: ConnectionSortMode = .manual {
+        didSet { save() }
+    }
+    @Published var hidesSensitiveInfo = false {
         didSet { save() }
     }
 
@@ -103,6 +107,10 @@ final class AppPreferencesStore: ObservableObject {
         connectionSortMode = mode
     }
 
+    func setHidesSensitiveInfo(_ hidesSensitiveInfo: Bool) {
+        self.hidesSensitiveInfo = hidesSensitiveInfo
+    }
+
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
@@ -113,12 +121,14 @@ final class AppPreferencesStore: ObservableObject {
             language = cache.language
             theme = cache.theme
             connectionSortMode = cache.connectionSortMode
+            hidesSensitiveInfo = cache.hidesSensitiveInfo
         } catch {
             installedApps = []
             lastScannedAt = nil
             language = .chinese
             theme = .system
             connectionSortMode = .manual
+            hidesSensitiveInfo = false
         }
     }
 
@@ -129,7 +139,8 @@ final class AppPreferencesStore: ObservableObject {
                 lastScannedAt: lastScannedAt,
                 language: language,
                 theme: theme,
-                connectionSortMode: connectionSortMode
+                connectionSortMode: connectionSortMode,
+                hidesSensitiveInfo: hidesSensitiveInfo
             )
             let data = try encoder.encode(cache)
             try data.write(to: fileURL, options: .atomic)
