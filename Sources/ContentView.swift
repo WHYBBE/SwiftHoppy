@@ -1388,7 +1388,7 @@ struct SettingsView: View {
     private func exportConnections() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "swiftgnuinfo-connections.json"
+        panel.nameFieldStringValue = "swifthoppy-connections.json"
         panel.canCreateDirectories = true
 
         guard panel.runModal() == .OK, let url = panel.url else { return }

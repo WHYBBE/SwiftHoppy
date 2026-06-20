@@ -1,4 +1,4 @@
-# SwiftGNUInfo
+# SwiftHoppy
 
 一个使用 `Swift + SwiftUI + Swift Package Manager` 构建的 macOS 桌面应用，用于手动记录 SSH 连接信息，并保存对应的 Linux/Unix 内核版本与最后更新信息。
 
@@ -45,4 +45,4 @@ swift run
 
 数据默认保存在：
 
-`~/Library/Application Support/SwiftGNUInfo/connections.json`
+`~/Library/Application Support/SwiftHoppy/connections.json`

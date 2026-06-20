@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftGNUInfo",
+    name: "SwiftHoppy",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "SwiftGNUInfo",
-            targets: ["SwiftGNUInfo"]
+            name: "SwiftHoppy",
+            targets: ["SwiftHoppy"]
         )
     ],
     targets: [
         .executableTarget(
-            name: "SwiftGNUInfo",
+            name: "SwiftHoppy",
             path: "Sources"
         )
     ]

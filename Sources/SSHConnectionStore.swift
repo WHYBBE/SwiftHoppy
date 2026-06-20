@@ -25,7 +25,7 @@ final class SSHConnectionStore: ObservableObject {
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let folderURL = appSupport.appendingPathComponent("SwiftGNUInfo", isDirectory: true)
+        let folderURL = appSupport.appendingPathComponent("SwiftHoppy", isDirectory: true)
         try? FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
         self.fileURL = folderURL.appendingPathComponent("connections.json")
 

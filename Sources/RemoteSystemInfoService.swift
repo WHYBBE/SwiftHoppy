@@ -438,7 +438,7 @@ enum RemoteSystemInfoService {
     }
 
     private static func makeAskpassHelper() throws -> URL {
-        let helperURL = FileManager.default.temporaryDirectory.appendingPathComponent("swiftgnuinfo-ssh-askpass.sh")
+        let helperURL = FileManager.default.temporaryDirectory.appendingPathComponent("swifthoppy-ssh-askpass.sh")
         let script = #"""
         #!/bin/sh
         export LC_ALL=en_US.UTF-8
@@ -446,7 +446,7 @@ enum RemoteSystemInfoService {
         /usr/bin/osascript <<'APPLESCRIPT'
         set promptText to system attribute "SSH_ASKPASS_PROMPT"
         try
-            display dialog promptText with title "SwiftGNUInfo" default answer "" with hidden answer buttons {"Cancel", "OK"} default button "OK"
+            display dialog promptText with title "SwiftHoppy" default answer "" with hidden answer buttons {"Cancel", "OK"} default button "OK"
             text returned of result
         on error number -128
             error number 1

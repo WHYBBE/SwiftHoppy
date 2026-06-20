@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct SwiftGNUInfoApp: App {
+struct SwiftHoppyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = SSHConnectionStore()
     @StateObject private var preferences = AppPreferencesStore()
