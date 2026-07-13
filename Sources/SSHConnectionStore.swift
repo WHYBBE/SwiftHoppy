@@ -5,14 +5,41 @@ enum SSHConnectionStoreError: LocalizedError {
     case loadFailed(String)
     case saveFailed(String)
 
-    var errorDescription: String? {
+    func message(language: AppLanguage) -> String {
         switch self {
         case .invalidImportData:
-            return "无法导入该文件，JSON 格式无效或内容不匹配。 / Unable to import: invalid or mismatched JSON."
+            return language.text(
+                "无法导入该文件，JSON 格式无效或内容不匹配。",
+                "Unable to import: invalid or mismatched JSON."
+            )
         case .loadFailed(let detail):
-            return "连接数据读取失败 / Failed to load connections: \(detail)"
+            return language.text(
+                "连接数据读取失败：\(detail)",
+                "Failed to load connections: \(detail)"
+            )
         case .saveFailed(let detail):
-            return "连接数据保存失败 / Failed to save connections: \(detail)"
+            return language.text(
+                "连接数据保存失败：\(detail)",
+                "Failed to save connections: \(detail)"
+            )
+        }
+    }
+
+    var errorDescription: String? {
+        message(language: .chinese)
+    }
+}
+
+enum ConnectionPersistenceIssue: Equatable {
+    case loadFailed(detail: String)
+    case saveFailed(detail: String)
+
+    func message(language: AppLanguage) -> String {
+        switch self {
+        case .loadFailed(let detail):
+            return SSHConnectionStoreError.loadFailed(detail).message(language: language)
+        case .saveFailed(let detail):
+            return SSHConnectionStoreError.saveFailed(detail).message(language: language)
         }
     }
 }
@@ -26,7 +53,7 @@ final class SSHConnectionStore: ObservableObject {
         }
     }
 
-    @Published private(set) var persistenceErrorMessage: String?
+    @Published private(set) var persistenceIssue: ConnectionPersistenceIssue?
 
     private var isApplyingLoadedState = false
     private let fileURL: URL
@@ -54,17 +81,17 @@ final class SSHConnectionStore: ObservableObject {
         case .success(let loaded):
             applyLoadedConnections(loaded)
             normalizeManualOrder()
-        case .failed(let message):
-            persistenceErrorMessage = message
+        case .failed(let detail):
+            persistenceIssue = .loadFailed(detail: detail)
         }
-    }
-
-    func dismissPersistenceError() {
-        persistenceErrorMessage = nil
     }
 
     var firstSelectableID: SSHConnection.ID? {
         connections.first(where: { !$0.isSeparator })?.id
+    }
+
+    func dismissPersistenceError() {
+        persistenceIssue = nil
     }
 
     func addConnection() -> SSHConnection.ID {
@@ -140,7 +167,7 @@ final class SSHConnectionStore: ObservableObject {
             username: "root",
             isLocal: false,
             notesEntries: [
-                NoteEntry(content: "示例记录，可直接修改或删除。")
+                NoteEntry(content: "示例记录，可直接修改或删除。 / Sample entry — edit or delete.")
             ],
             systemInfoHistory: [
                 SystemInfoSnapshot(
@@ -198,7 +225,7 @@ final class SSHConnectionStore: ObservableObject {
             if let backupPath {
                 detail += " | backup: \(backupPath)"
             }
-            return .failed(SSHConnectionStoreError.loadFailed(detail).errorDescription ?? detail)
+            return .failed(detail)
         }
     }
 
@@ -222,12 +249,11 @@ final class SSHConnectionStore: ObservableObject {
         do {
             let data = try encoder.encode(connections)
             try data.write(to: fileURL, options: .atomic)
-            if persistenceErrorMessage?.contains("保存失败") == true
-                || persistenceErrorMessage?.contains("Failed to save") == true {
-                persistenceErrorMessage = nil
+            if case .saveFailed = persistenceIssue {
+                persistenceIssue = nil
             }
         } catch {
-            persistenceErrorMessage = SSHConnectionStoreError.saveFailed(error.localizedDescription).errorDescription
+            persistenceIssue = .saveFailed(detail: error.localizedDescription)
         }
     }
 }

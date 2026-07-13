@@ -11,17 +11,30 @@ struct RemoteSystemInfo {
 enum RemoteSystemInfoError: LocalizedError {
     case invalidHost
     case sshUnavailable
+    case connectionFailed
+    case localCommandFailed
     case commandFailed(String)
 
-    var errorDescription: String? {
+    func message(language: AppLanguage) -> String {
         switch self {
         case .invalidHost:
-            return "请先填写有效的主机地址。"
+            return language.text("请先填写有效的主机地址。", "Enter a valid host address first.")
         case .sshUnavailable:
-            return "系统未找到 ssh 命令。"
+            return language.text("系统未找到 ssh 命令。", "The system ssh command was not found.")
+        case .connectionFailed:
+            return language.text(
+                "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。",
+                "SSH connection failed. Check keys, known_hosts, or remote reachability."
+            )
+        case .localCommandFailed:
+            return language.text("本地命令执行失败。", "Local command failed.")
         case .commandFailed(let message):
             return message
         }
+    }
+
+    var errorDescription: String? {
+        message(language: .chinese)
     }
 }
 
@@ -46,7 +59,7 @@ enum RemoteSystemInfoService {
                 executablePath: sshPath,
                 arguments: sshArguments(for: connection) + [hardwareCommand],
                 environment: try askpassEnvironment(for: connection),
-                defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
+                fallbackError: .connectionFailed
             )
             return parseHardwareOutput(output)
         }
@@ -111,7 +124,7 @@ enum RemoteSystemInfoService {
                 executablePath: sshPath,
                 arguments: sshArguments(for: connection) + [remoteCommand],
                 environment: try askpassEnvironment(for: connection),
-                defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
+                fallbackError: .connectionFailed
             )
             return parseRemoteSystemInfoOutput(output)
         }
@@ -129,7 +142,7 @@ enum RemoteSystemInfoService {
             executablePath: "/bin/zsh",
             arguments: ["-lc", hardwareCommand],
             environment: ProcessInfo.processInfo.environment,
-            defaultErrorMessage: "本地命令执行失败。"
+            fallbackError: .localCommandFailed
         )
         return parseHardwareOutput(output)
     }
@@ -161,7 +174,7 @@ enum RemoteSystemInfoService {
             executablePath: "/bin/zsh",
             arguments: ["-lc", localCommand],
             environment: ProcessInfo.processInfo.environment,
-            defaultErrorMessage: "本地命令执行失败。"
+            fallbackError: .localCommandFailed
         )
         return parseRemoteSystemInfoOutput(output)
     }
@@ -175,8 +188,8 @@ enum RemoteSystemInfoService {
         let values = parseKeyValueLines(lines)
 
         let kernelVersion = values["KERNEL", default: "Unknown"]
-        let rawUpdateInfo = values["UPDATE", default: ""]
-        let updateInfo = rawUpdateInfo.isEmpty ? "未检测到更新信息" : rawUpdateInfo
+        // Keep empty when unknown; UI localizes the placeholder.
+        let updateInfo = values["UPDATE", default: ""]
         let uptimeInfo = formatUptime(values["UPTIME", default: ""])
         let updateRecordedAt = values["UPDATE_TS"].flatMap { value -> Date? in
             guard let seconds = TimeInterval(value.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
@@ -222,7 +235,7 @@ enum RemoteSystemInfoService {
         executablePath: String,
         arguments: [String],
         environment: [String: String],
-        defaultErrorMessage: String
+        fallbackError: RemoteSystemInfoError
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
@@ -245,7 +258,10 @@ enum RemoteSystemInfoService {
 
         guard process.terminationStatus == 0 else {
             let message = error.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw RemoteSystemInfoError.commandFailed(message.isEmpty ? defaultErrorMessage : message)
+            if message.isEmpty {
+                throw fallbackError
+            }
+            throw RemoteSystemInfoError.commandFailed(message)
         }
 
         return output

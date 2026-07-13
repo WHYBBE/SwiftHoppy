@@ -199,7 +199,7 @@ struct ContentView: View {
             t("数据错误", "Data Error"),
             isPresented: Binding(
                 get: {
-                    store.persistenceErrorMessage != nil || preferences.persistenceErrorMessage != nil
+                    store.persistenceIssue != nil || preferences.persistenceIssue != nil
                 },
                 set: { isPresented in
                     if !isPresented {
@@ -209,12 +209,16 @@ struct ContentView: View {
                 }
             )
         ) {
-            Button("OK") {
+            Button(t("好", "OK")) {
                 store.dismissPersistenceError()
                 preferences.dismissPersistenceError()
             }
         } message: {
-            Text(store.persistenceErrorMessage ?? preferences.persistenceErrorMessage ?? "")
+            Text(
+                store.persistenceIssue?.message(language: preferences.language)
+                    ?? preferences.persistenceIssue?.message(language: preferences.language)
+                    ?? ""
+            )
         }
     }
 
@@ -548,7 +552,7 @@ struct ConnectionDetailView: View {
                 }
             }
         )) {
-            Button("OK") {
+            Button(t("好", "OK")) {
                 onDismissError()
                 fetchErrorMessage = ""
             }
@@ -975,7 +979,12 @@ struct ConnectionDetailView: View {
             }
 
             detailSummaryRow(title: t("内核版本", "Kernel Version"), value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion)
-            detailSummaryRow(title: t("最后更新信息", "Last Update Info"), value: snapshot.updateInfo.isEmpty ? "-" : snapshot.updateInfo)
+            detailSummaryRow(
+                title: t("最后更新信息", "Last Update Info"),
+                value: snapshot.updateInfo.isEmpty
+                    ? t("未检测到更新信息", "No update info detected")
+                    : snapshot.updateInfo
+            )
 
             if !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 detailSummaryRow(title: t("运行时间", "Uptime"), value: snapshot.uptimeInfo)
@@ -1028,7 +1037,7 @@ struct ConnectionDetailView: View {
                 }
             } catch {
                 await MainActor.run {
-                    fetchErrorMessage = error.localizedDescription
+                    fetchErrorMessage = localizedFetchError(error)
                     isFetchingSystemInfo = false
                 }
             }
@@ -1049,11 +1058,18 @@ struct ConnectionDetailView: View {
                 }
             } catch {
                 await MainActor.run {
-                    fetchErrorMessage = error.localizedDescription
+                    fetchErrorMessage = localizedFetchError(error)
                     isFetchingHardwareInfo = false
                 }
             }
         }
+    }
+
+    private func localizedFetchError(_ error: Error) -> String {
+        if let remoteError = error as? RemoteSystemInfoError {
+            return remoteError.message(language: preferences.language)
+        }
+        return error.localizedDescription
     }
 
     private func deleteSnapshot(id: SystemInfoSnapshot.ID) {
@@ -1400,8 +1416,8 @@ struct SettingsView: View {
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: {
                 !settingsErrorMessage.isEmpty
-                    || store.persistenceErrorMessage != nil
-                    || preferences.persistenceErrorMessage != nil
+                    || store.persistenceIssue != nil
+                    || preferences.persistenceIssue != nil
             },
             set: { isPresented in
                 if !isPresented {
@@ -1411,7 +1427,7 @@ struct SettingsView: View {
                 }
             }
         )) {
-            Button("OK") {
+            Button(t("好", "OK")) {
                 settingsErrorMessage = ""
                 store.dismissPersistenceError()
                 preferences.dismissPersistenceError()
@@ -1419,7 +1435,9 @@ struct SettingsView: View {
         } message: {
             Text(
                 settingsErrorMessage.isEmpty
-                    ? (store.persistenceErrorMessage ?? preferences.persistenceErrorMessage ?? "")
+                    ? (store.persistenceIssue?.message(language: preferences.language)
+                        ?? preferences.persistenceIssue?.message(language: preferences.language)
+                        ?? "")
                     : settingsErrorMessage
             )
         }
@@ -1468,7 +1486,7 @@ struct SettingsView: View {
             let data = try store.exportData()
             try data.write(to: url, options: .atomic)
         } catch {
-            settingsErrorMessage = error.localizedDescription
+            settingsErrorMessage = localizedSettingsError(error)
         }
     }
 
@@ -1485,8 +1503,15 @@ struct SettingsView: View {
             let data = try Data(contentsOf: url)
             try store.importData(from: data)
         } catch {
-            settingsErrorMessage = error.localizedDescription
+            settingsErrorMessage = localizedSettingsError(error)
         }
+    }
+
+    private func localizedSettingsError(_ error: Error) -> String {
+        if let storeError = error as? SSHConnectionStoreError {
+            return storeError.message(language: preferences.language)
+        }
+        return error.localizedDescription
     }
 }
 

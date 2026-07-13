@@ -1,15 +1,21 @@
 import Foundation
 
-enum AppPreferencesStoreError: LocalizedError {
-    case loadFailed(String)
-    case saveFailed(String)
+enum PreferencesPersistenceIssue: Equatable {
+    case loadFailed(detail: String)
+    case saveFailed(detail: String)
 
-    var errorDescription: String? {
+    func message(language: AppLanguage) -> String {
         switch self {
         case .loadFailed(let detail):
-            return "偏好设置读取失败 / Failed to load preferences: \(detail)"
+            return language.text(
+                "偏好设置读取失败：\(detail)",
+                "Failed to load preferences: \(detail)"
+            )
         case .saveFailed(let detail):
-            return "偏好设置保存失败 / Failed to save preferences: \(detail)"
+            return language.text(
+                "偏好设置保存失败：\(detail)",
+                "Failed to save preferences: \(detail)"
+            )
         }
     }
 }
@@ -26,6 +32,15 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable {
             return "English"
         case .chinese:
             return "中文"
+        }
+    }
+
+    func text(_ chinese: String, _ english: String) -> String {
+        switch self {
+        case .english:
+            return english
+        case .chinese:
+            return chinese
         }
     }
 }
@@ -125,7 +140,7 @@ final class AppPreferencesStore: ObservableObject {
             save()
         }
     }
-    @Published private(set) var persistenceErrorMessage: String?
+    @Published private(set) var persistenceIssue: PreferencesPersistenceIssue?
 
     private var isApplyingLoadedState = false
     private let fileURL: URL
@@ -144,7 +159,7 @@ final class AppPreferencesStore: ObservableObject {
     }
 
     func dismissPersistenceError() {
-        persistenceErrorMessage = nil
+        persistenceIssue = nil
     }
 
     func refreshInstalledApps() {
@@ -162,12 +177,7 @@ final class AppPreferencesStore: ObservableObject {
     }
 
     func text(_ chinese: String, _ english: String) -> String {
-        switch language {
-        case .english:
-            return english
-        case .chinese:
-            return chinese
-        }
+        language.text(chinese, english)
     }
 
     func setConnectionSortMode(_ mode: ConnectionSortMode) {
@@ -199,7 +209,7 @@ final class AppPreferencesStore: ObservableObject {
             if let backupPath {
                 detail += " | backup: \(backupPath)"
             }
-            persistenceErrorMessage = AppPreferencesStoreError.loadFailed(detail).errorDescription
+            persistenceIssue = .loadFailed(detail: detail)
         }
     }
 
@@ -231,12 +241,11 @@ final class AppPreferencesStore: ObservableObject {
             )
             let data = try encoder.encode(cache)
             try data.write(to: fileURL, options: .atomic)
-            if persistenceErrorMessage?.contains("保存失败") == true
-                || persistenceErrorMessage?.contains("Failed to save") == true {
-                persistenceErrorMessage = nil
+            if case .saveFailed = persistenceIssue {
+                persistenceIssue = nil
             }
         } catch {
-            persistenceErrorMessage = AppPreferencesStoreError.saveFailed(error.localizedDescription).errorDescription
+            persistenceIssue = .saveFailed(detail: error.localizedDescription)
         }
     }
 
