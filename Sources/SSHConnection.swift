@@ -297,4 +297,23 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedUsername.isEmpty ? trimmedHost : "\(trimmedUsername)@\(trimmedHost)"
     }
+
+    /// Returns a localized validation message, or nil when the connection fields are usable.
+    func validationMessage(language: AppLanguage) -> String? {
+        if isLocal {
+            return nil
+        }
+
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedHost.isEmpty {
+            return language.text("请填写主机地址。", "Host is required.")
+        }
+        if trimmedHost.contains(where: { $0.isWhitespace }) {
+            return language.text("主机地址不能包含空格。", "Host cannot contain spaces.")
+        }
+        if !(1...65_535).contains(port) {
+            return language.text("端口必须在 1–65535 之间。", "Port must be between 1 and 65535.")
+        }
+        return nil
+    }
 }

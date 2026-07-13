@@ -408,6 +408,11 @@ struct ContentView: View {
             return
         }
 
+        if let validation = connection.validationMessage(language: preferences.language) {
+            errorMessage = validation
+            return
+        }
+
         guard let url = connection.sshURL else {
             errorMessage = t("SSH 地址无效，请检查主机、端口和用户名。", "Invalid SSH address. Check host, port, and username.")
             return
@@ -453,6 +458,8 @@ struct ConnectionDetailView: View {
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
     @State private var isFetchingHardwareInfo = false
+    @State private var systemInfoFetchTask: Task<Void, Never>?
+    @State private var hardwareInfoFetchTask: Task<Void, Never>?
     @State private var fetchErrorMessage = ""
     @State private var showConnectionEditor = false
     @State private var creatingNote = false
@@ -543,6 +550,10 @@ struct ConnectionDetailView: View {
                 draft = newValue
             }
         }
+        .onDisappear {
+            cancelSystemInfoFetch()
+            cancelHardwareFetch()
+        }
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: { !errorMessage.isEmpty || !fetchErrorMessage.isEmpty },
             set: { isPresented in
@@ -560,7 +571,7 @@ struct ConnectionDetailView: View {
             Text(fetchErrorMessage.isEmpty ? errorMessage : fetchErrorMessage)
         }
         .sheet(isPresented: $showConnectionEditor) {
-            ConnectionInfoEditorView(connection: $draft, installedApps: installedApps, chooseApplication: chooseApplication)
+            ConnectionInfoEditorView(connection: $draft, installedApps: installedApps)
         }
         .sheet(isPresented: $creatingNote) {
             NoteEditorView(note: NoteEntry(manualOrder: (draft.notesEntries.map(\ .manualOrder).max() ?? -1) + 1), title: t("新建备注", "New Note")) { newNote in
@@ -650,10 +661,15 @@ struct ConnectionDetailView: View {
                 .buttonStyle(.borderedProminent)
 
                 Menu {
-                    Button(isFetchingHardwareInfo ? t("正在获取硬件信息...", "Reading Hardware Info...") : t("获取硬件信息", "Read Hardware Info")) {
-                        refreshHardwareInfo()
+                    if isFetchingHardwareInfo {
+                        Button(t("取消获取硬件", "Cancel Hardware Read"), role: .destructive) {
+                            cancelHardwareFetch()
+                        }
+                    } else {
+                        Button(t("获取硬件信息", "Read Hardware Info")) {
+                            refreshHardwareInfo()
+                        }
                     }
-                    .disabled(isFetchingHardwareInfo)
 
                     Button(t("排序备注", "Sort Notes")) {
                         showNoteSortEditor = true
@@ -762,10 +778,15 @@ struct ConnectionDetailView: View {
                 Spacer()
 
                 Menu {
-                    Button(isFetchingHardwareInfo ? t("正在更新...", "Updating...") : t("更新", "Update")) {
-                        refreshHardwareInfo()
+                    if isFetchingHardwareInfo {
+                        Button(t("取消", "Cancel"), role: .destructive) {
+                            cancelHardwareFetch()
+                        }
+                    } else {
+                        Button(t("更新", "Update")) {
+                            refreshHardwareInfo()
+                        }
                     }
-                    .disabled(isFetchingHardwareInfo)
 
                     Button(t("删除显示", "Remove Display"), role: .destructive) {
                         draft.hardwareInfo = nil
@@ -866,10 +887,15 @@ struct ConnectionDetailView: View {
                 Spacer()
 
                 Menu {
-                    Button(isFetchingSystemInfo ? t("正在读取...", "Reading...") : (draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH"))) {
-                        refreshRemoteSystemInfo()
+                    if isFetchingSystemInfo {
+                        Button(t("取消读取", "Cancel Read"), role: .destructive) {
+                            cancelSystemInfoFetch()
+                        }
+                    } else {
+                        Button(draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH")) {
+                            refreshRemoteSystemInfo()
+                        }
                     }
-                    .disabled(isFetchingSystemInfo)
 
                     Button(t("新建手填", "New Manual Entry")) {
                         creatingManualSnapshot = true
@@ -1001,71 +1027,85 @@ struct ConnectionDetailView: View {
         )
     }
 
-    private func chooseApplication() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.application]
-        if panel.runModal() == .OK {
-            draft.preferredAppPath = panel.url?.path ?? ""
-        }
-    }
-
     private func refreshRemoteSystemInfo() {
+        systemInfoFetchTask?.cancel()
         let snapshot = draft
         isFetchingSystemInfo = true
         fetchErrorMessage = ""
 
-        Task {
+        systemInfoFetchTask = Task {
             do {
                 let info = try await RemoteSystemInfoService.fetch(for: snapshot)
-                await MainActor.run {
-                    draft.systemInfoHistory.insert(
-                        SystemInfoSnapshot(
-                            kernelVersion: info.kernelVersion,
-                            updateInfo: info.updateInfo,
-                            uptimeInfo: info.uptimeInfo,
-                            updateRecordedAt: info.updateRecordedAt,
-                            isManualEntry: false,
-                            isEdited: false,
-                            recordedAt: info.recordedAt
-                        ),
-                        at: 0
-                    )
-                    isFetchingSystemInfo = false
-                }
+                guard !Task.isCancelled else { return }
+                draft.systemInfoHistory.insert(
+                    SystemInfoSnapshot(
+                        kernelVersion: info.kernelVersion,
+                        updateInfo: info.updateInfo,
+                        uptimeInfo: info.uptimeInfo,
+                        updateRecordedAt: info.updateRecordedAt,
+                        isManualEntry: false,
+                        isEdited: false,
+                        recordedAt: info.recordedAt
+                    ),
+                    at: 0
+                )
+                isFetchingSystemInfo = false
+                systemInfoFetchTask = nil
             } catch {
-                await MainActor.run {
-                    fetchErrorMessage = localizedFetchError(error)
+                if error is CancellationError {
                     isFetchingSystemInfo = false
+                    systemInfoFetchTask = nil
+                    return
                 }
+                fetchErrorMessage = localizedFetchError(error)
+                isFetchingSystemInfo = false
+                systemInfoFetchTask = nil
             }
         }
     }
 
     private func refreshHardwareInfo() {
+        hardwareInfoFetchTask?.cancel()
         let snapshot = draft
         isFetchingHardwareInfo = true
         fetchErrorMessage = ""
 
-        Task {
+        hardwareInfoFetchTask = Task {
             do {
                 let info = try await RemoteSystemInfoService.fetchHardware(for: snapshot)
-                await MainActor.run {
-                    draft.hardwareInfo = info
-                    isFetchingHardwareInfo = false
-                }
+                guard !Task.isCancelled else { return }
+                draft.hardwareInfo = info
+                isFetchingHardwareInfo = false
+                hardwareInfoFetchTask = nil
             } catch {
-                await MainActor.run {
-                    fetchErrorMessage = localizedFetchError(error)
+                if error is CancellationError {
                     isFetchingHardwareInfo = false
+                    hardwareInfoFetchTask = nil
+                    return
                 }
+                fetchErrorMessage = localizedFetchError(error)
+                isFetchingHardwareInfo = false
+                hardwareInfoFetchTask = nil
             }
         }
     }
 
+    private func cancelSystemInfoFetch() {
+        systemInfoFetchTask?.cancel()
+        systemInfoFetchTask = nil
+        isFetchingSystemInfo = false
+    }
+
+    private func cancelHardwareFetch() {
+        hardwareInfoFetchTask?.cancel()
+        hardwareInfoFetchTask = nil
+        isFetchingHardwareInfo = false
+    }
+
     private func localizedFetchError(_ error: Error) -> String {
+        if error is CancellationError {
+            return RemoteSystemInfoError.cancelled.message(language: preferences.language)
+        }
         if let remoteError = error as? RemoteSystemInfoError {
             return remoteError.message(language: preferences.language)
         }
@@ -1096,54 +1136,96 @@ struct ConnectionInfoEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: AppPreferencesStore
     @Binding var connection: SSHConnection
+    @State private var draft: SSHConnection
+    @State private var validationMessage = ""
     let installedApps: [InstalledTerminalApp]
-    let chooseApplication: () -> Void
+
+    init(
+        connection: Binding<SSHConnection>,
+        installedApps: [InstalledTerminalApp]
+    ) {
+        self._connection = connection
+        self._draft = State(initialValue: connection.wrappedValue)
+        self.installedApps = installedApps
+    }
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
     }
 
     var body: some View {
-        Form {
-            Section(t("连接信息", "Connection")) {
-                TextField(t("名称", "Name"), text: $connection.name)
-                Toggle(t("标记为本地", "Mark as Local"), isOn: $connection.isLocal)
+        NavigationStack {
+            Form {
+                Section(t("连接信息", "Connection")) {
+                    TextField(t("名称", "Name"), text: $draft.name)
+                    Toggle(t("标记为本地", "Mark as Local"), isOn: $draft.isLocal)
 
-                if !connection.isLocal {
-                    TextField(t("主机", "Host"), text: $connection.host)
-                    TextField(t("用户名", "Username"), text: $connection.username)
-                    TextField(t("端口", "Port"), value: $connection.port, format: .number)
+                    if !draft.isLocal {
+                        TextField(t("主机", "Host"), text: $draft.host)
+                        TextField(t("用户名", "Username"), text: $draft.username)
+                        TextField(t("端口", "Port"), value: $draft.port, format: .number)
+                    }
+                }
+
+                Section(t("打开方式", "Open With")) {
+                    Picker(t("已安装应用", "Installed Apps"), selection: $draft.preferredAppPath) {
+                        Text(t("系统默认", "System Default")).tag("")
+                        ForEach(installedApps) { app in
+                            Text(app.name).tag(app.path)
+                        }
+                    }
+
+                    HStack {
+                        Button(t("选择应用", "Choose Application")) {
+                            chooseApplicationForDraft()
+                        }
+                        if !draft.preferredAppPath.isEmpty {
+                            Button(t("清除", "Clear")) {
+                                draft.preferredAppPath = ""
+                            }
+                        }
+                    }
+                }
+
+                if !validationMessage.isEmpty {
+                    Section {
+                        Text(validationMessage)
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                    }
                 }
             }
-
-            Section(t("打开方式", "Open With")) {
-                Picker(t("已安装应用", "Installed Apps"), selection: $connection.preferredAppPath) {
-                    Text(t("系统默认", "System Default")).tag("")
-                    ForEach(installedApps) { app in
-                        Text(app.name).tag(app.path)
+            .formStyle(.grouped)
+            .frame(width: 520, height: 440)
+            .navigationTitle(t("编辑信息", "Edit Info"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel")) {
+                        dismiss()
                     }
                 }
-
-                HStack {
-                    Button(t("选择应用", "Choose Application")) {
-                        chooseApplication()
-                    }
-                    if !connection.preferredAppPath.isEmpty {
-                        Button(t("清除", "Clear")) {
-                            connection.preferredAppPath = ""
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("完成", "Done")) {
+                        if let message = draft.validationMessage(language: preferences.language) {
+                            validationMessage = message
+                            return
                         }
+                        connection = draft
+                        dismiss()
                     }
                 }
             }
         }
-        .padding()
-        .frame(width: 520, height: 420)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(t("完成", "Done")) {
-                    dismiss()
-                }
-            }
+    }
+
+    private func chooseApplicationForDraft() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.application]
+        if panel.runModal() == .OK {
+            draft.preferredAppPath = panel.url?.path ?? ""
         }
     }
 }
@@ -1152,6 +1234,7 @@ struct NoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var note: NoteEntry
+    @State private var validationMessage = ""
     let title: String
     let onSave: (NoteEntry) -> Void
 
@@ -1166,26 +1249,43 @@ struct NoteEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            TextEditor(text: $note.content)
-                .frame(minHeight: 220)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                )
-        }
-        .padding()
-        .frame(width: 560, height: 340)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(t("保存", "Save")) {
-                    onSave(note)
-                    dismiss()
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                TextEditor(text: $note.content)
+                    .frame(minHeight: 220)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.primary.opacity(0.04))
+                    )
+
+                if !validationMessage.isEmpty {
+                    Text(validationMessage)
+                        .foregroundStyle(.red)
+                        .font(.callout)
+                }
+            }
+            .padding()
+            .frame(width: 560, height: 360)
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel")) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("保存", "Save")) {
+                        if note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            validationMessage = t("备注内容不能为空。", "Note content cannot be empty.")
+                            return
+                        }
+                        onSave(note)
+                        dismiss()
+                    }
                 }
             }
         }
-        .navigationTitle(title)
     }
 }
 
@@ -1193,65 +1293,80 @@ struct NoteSortEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: AppPreferencesStore
     @Binding var connection: SSHConnection
+    @State private var draft: SSHConnection
+
+    init(connection: Binding<SSHConnection>) {
+        self._connection = connection
+        self._draft = State(initialValue: connection.wrappedValue)
+    }
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Picker(t("排序模式", "Sort Mode"), selection: $connection.noteSortMode) {
-                Text(t("手动", "Manual")).tag(NoteSortMode.manual)
-                Text(t("时间", "Time")).tag(NoteSortMode.time)
-            }
-            .pickerStyle(.segmented)
+        NavigationStack {
+            VStack(spacing: 16) {
+                Picker(t("排序模式", "Sort Mode"), selection: $draft.noteSortMode) {
+                    Text(t("手动", "Manual")).tag(NoteSortMode.manual)
+                    Text(t("时间", "Time")).tag(NoteSortMode.time)
+                }
+                .pickerStyle(.segmented)
 
-            List {
-                ForEach(sortedNotes) { note in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(note.content)
-                            .lineLimit(2)
-                        Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                List {
+                    ForEach(sortedNotes) { note in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(note.content)
+                                .lineLimit(2)
+                            Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onMove(perform: draft.noteSortMode == .manual ? moveNotes : nil)
+                }
+            }
+            .padding()
+            .frame(width: 560, height: 480)
+            .navigationTitle(t("排序备注", "Sort Notes"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel")) {
+                        dismiss()
                     }
                 }
-                .onMove(perform: connection.noteSortMode == .manual ? moveNotes : nil)
-            }
-        }
-        .padding()
-        .frame(width: 560, height: 480)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(t("完成", "Done")) {
-                    dismiss()
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("完成", "Done")) {
+                        connection = draft
+                        dismiss()
+                    }
                 }
             }
         }
     }
 
     private var sortedNotes: [NoteEntry] {
-        switch connection.noteSortMode {
+        switch draft.noteSortMode {
         case .manual:
-            return connection.notesEntries.sorted {
+            return draft.notesEntries.sorted {
                 if $0.manualOrder == $1.manualOrder {
                     return $0.createdAt > $1.createdAt
                 }
                 return $0.manualOrder < $1.manualOrder
             }
         case .time:
-            return connection.notesEntries.sorted { $0.createdAt > $1.createdAt }
+            return draft.notesEntries.sorted { $0.createdAt > $1.createdAt }
         }
     }
 
     private func moveNotes(from source: IndexSet, to destination: Int) {
-        guard connection.noteSortMode == .manual else { return }
+        guard draft.noteSortMode == .manual else { return }
         var notes = sortedNotes
         notes.move(fromOffsets: source, toOffset: destination)
         for index in notes.indices {
             notes[index].manualOrder = index
         }
-        connection.notesEntries = notes
+        draft.notesEntries = notes
     }
 }
 
@@ -1259,6 +1374,7 @@ struct SystemHistoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var snapshot: SystemInfoSnapshot
+    @State private var validationMessage = ""
     let title: String
     let onSave: (SystemInfoSnapshot) -> Void
 
@@ -1273,34 +1389,53 @@ struct SystemHistoryEditorView: View {
     }
 
     var body: some View {
-        Form {
-            TextField(t("内核版本", "Kernel Version"), text: $snapshot.kernelVersion)
-            TextField(t("最后更新信息", "Last Update Info"), text: $snapshot.updateInfo)
-            TextField(t("运行时间", "Uptime"), text: $snapshot.uptimeInfo)
-            DatePicker(
-                t("更新日期", "Update Date"),
-                selection: Binding(
-                    get: { snapshot.updateRecordedAt ?? snapshot.recordedAt },
-                    set: { snapshot.updateRecordedAt = $0 }
-                ),
-                displayedComponents: [.date]
-            )
-        }
-        .padding()
-        .frame(width: 520, height: 360)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(t("保存", "Save")) {
-                    if snapshot.updateRecordedAt == nil {
-                        snapshot.updateRecordedAt = snapshot.recordedAt
+        NavigationStack {
+            Form {
+                TextField(t("内核版本", "Kernel Version"), text: $snapshot.kernelVersion)
+                TextField(t("最后更新信息", "Last Update Info"), text: $snapshot.updateInfo)
+                TextField(t("运行时间", "Uptime"), text: $snapshot.uptimeInfo)
+                DatePicker(
+                    t("更新日期", "Update Date"),
+                    selection: Binding(
+                        get: { snapshot.updateRecordedAt ?? snapshot.recordedAt },
+                        set: { snapshot.updateRecordedAt = $0 }
+                    ),
+                    displayedComponents: [.date]
+                )
+
+                if !validationMessage.isEmpty {
+                    Text(validationMessage)
+                        .foregroundStyle(.red)
+                        .font(.callout)
+                }
+            }
+            .formStyle(.grouped)
+            .frame(width: 520, height: 380)
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel")) {
+                        dismiss()
                     }
-                    snapshot.isEdited = true
-                    onSave(snapshot)
-                    dismiss()
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("保存", "Save")) {
+                        let hasContent = [snapshot.kernelVersion, snapshot.updateInfo, snapshot.uptimeInfo]
+                            .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        guard hasContent else {
+                            validationMessage = t("请至少填写一项内容。", "Fill in at least one field.")
+                            return
+                        }
+                        if snapshot.updateRecordedAt == nil {
+                            snapshot.updateRecordedAt = snapshot.recordedAt
+                        }
+                        snapshot.isEdited = true
+                        onSave(snapshot)
+                        dismiss()
+                    }
                 }
             }
         }
-        .navigationTitle(title)
     }
 }
 

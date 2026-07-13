@@ -13,6 +13,7 @@ enum RemoteSystemInfoError: LocalizedError {
     case sshUnavailable
     case connectionFailed
     case localCommandFailed
+    case cancelled
     case commandFailed(String)
 
     func message(language: AppLanguage) -> String {
@@ -28,6 +29,8 @@ enum RemoteSystemInfoError: LocalizedError {
             )
         case .localCommandFailed:
             return language.text("本地命令执行失败。", "Local command failed.")
+        case .cancelled:
+            return language.text("操作已取消。", "Operation cancelled.")
         case .commandFailed(let message):
             return message
         }
@@ -130,11 +133,18 @@ enum RemoteSystemInfoService {
         }
     }
 
-    /// Runs blocking process I/O off the cooperative pool / main actor so SwiftUI stays responsive.
+    /// Runs blocking process I/O off the main actor; respects task cancellation.
     private static func runDetached<T: Sendable>(_ work: @Sendable @escaping () throws -> T) async throws -> T {
-        try await Task.detached(priority: .userInitiated) {
-            try work()
-        }.value
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask(priority: .userInitiated) {
+                try work()
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw CancellationError()
+            }
+            return result
+        }
     }
 
     private static func fetchLocalHardware() throws -> HardwareInfo {
@@ -237,6 +247,8 @@ enum RemoteSystemInfoService {
         environment: [String: String],
         fallbackError: RemoteSystemInfoError
     ) throws -> String {
+        try Task.checkCancellation()
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
@@ -249,12 +261,29 @@ enum RemoteSystemInfoService {
         process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
 
         try process.run()
-        process.waitUntilExit()
+
+        // Poll so cooperative cancellation can terminate the child process.
+        while process.isRunning {
+            if Task.isCancelled {
+                process.terminate()
+                throw CancellationError()
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        if Task.isCancelled {
+            throw CancellationError()
+        }
 
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(decoding: outputData, as: UTF8.self)
         let error = String(decoding: errorData, as: UTF8.self)
+
+        // SIGTERM after cancel often yields non-zero status; treat as cancellation.
+        if process.terminationReason == .uncaughtSignal {
+            throw CancellationError()
+        }
 
         guard process.terminationStatus == 0 else {
             let message = error.trimmingCharacters(in: .whitespacesAndNewlines)
