@@ -190,9 +190,10 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            if selectedID == nil {
-                selectedID = store.firstSelectableID
-            }
+            reconcileSelection()
+        }
+        .onChange(of: store.connections) { _ in
+            reconcileSelection()
         }
         .alert(
             t("数据错误", "Data Error"),
@@ -252,7 +253,15 @@ struct ContentView: View {
 
     private var selectedConnection: SSHConnection? {
         guard let selectedID else { return nil }
-        return store.connections.first(where: { $0.id == selectedID })
+        return store.connections.first(where: { $0.id == selectedID && !$0.isSeparator })
+    }
+
+    private func reconcileSelection() {
+        if let selectedID,
+           store.connections.contains(where: { $0.id == selectedID && !$0.isSeparator }) {
+            return
+        }
+        selectedID = store.firstSelectableID
     }
 
     private var sortedConnections: [SSHConnection] {
@@ -333,10 +342,11 @@ struct ContentView: View {
     }
 
     private func updateStatus(for connection: SSHConnection) -> (label: String, color: Color)? {
-        guard let latest = connection.latestSystemInfo,
-              let updateDate = latest.updateRecordedAt else {
+        guard let latest = connection.latestSystemInfo else {
             return nil
         }
+        // Prefer package-update timestamp; fall back to snapshot time (covers manual entries).
+        let updateDate = latest.updateRecordedAt ?? latest.recordedAt
 
         let calendar = Calendar.current
         let startOfUpdateDay = calendar.startOfDay(for: updateDate)
@@ -435,6 +445,7 @@ struct ContentView: View {
 
 struct ConnectionDetailView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
+    let connection: SSHConnection
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
     @State private var isFetchingHardwareInfo = false
@@ -462,6 +473,7 @@ struct ConnectionDetailView: View {
         errorMessage: String,
         onDismissError: @escaping () -> Void
     ) {
+        self.connection = connection
         self._draft = State(initialValue: connection)
         self.installedApps = installedApps
         self.onSave = onSave
@@ -519,6 +531,14 @@ struct ConnectionDetailView: View {
         .onChange(of: draft) { newValue in
             onSave(newValue)
         }
+        .onChange(of: connection) { newValue in
+            // Re-sync when the store version diverges (import/clear/external replace).
+            var normalized = draft
+            normalized.updatedAt = newValue.updatedAt
+            if normalized != newValue {
+                draft = newValue
+            }
+        }
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: { !errorMessage.isEmpty || !fetchErrorMessage.isEmpty },
             set: { isPresented in
@@ -561,7 +581,10 @@ struct ConnectionDetailView: View {
             }
         }
         .sheet(isPresented: $creatingManualSnapshot) {
-            SystemHistoryEditorView(snapshot: SystemInfoSnapshot(isManualEntry: true), title: t("新建手填历史", "New Manual History")) { newSnapshot in
+            SystemHistoryEditorView(
+                snapshot: SystemInfoSnapshot(updateRecordedAt: .now, isManualEntry: true),
+                title: t("新建手填历史", "New Manual History")
+            ) { newSnapshot in
                 draft.systemInfoHistory.insert(newSnapshot, at: 0)
             }
         }
@@ -1238,12 +1261,23 @@ struct SystemHistoryEditorView: View {
             TextField(t("内核版本", "Kernel Version"), text: $snapshot.kernelVersion)
             TextField(t("最后更新信息", "Last Update Info"), text: $snapshot.updateInfo)
             TextField(t("运行时间", "Uptime"), text: $snapshot.uptimeInfo)
+            DatePicker(
+                t("更新日期", "Update Date"),
+                selection: Binding(
+                    get: { snapshot.updateRecordedAt ?? snapshot.recordedAt },
+                    set: { snapshot.updateRecordedAt = $0 }
+                ),
+                displayedComponents: [.date]
+            )
         }
         .padding()
-        .frame(width: 520, height: 320)
+        .frame(width: 520, height: 360)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(t("保存", "Save")) {
+                    if snapshot.updateRecordedAt == nil {
+                        snapshot.updateRecordedAt = snapshot.recordedAt
+                    }
                     snapshot.isEdited = true
                     onSave(snapshot)
                     dismiss()

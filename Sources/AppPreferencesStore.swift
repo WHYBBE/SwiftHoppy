@@ -60,6 +60,41 @@ struct TerminalAppCache: Codable {
     var theme: AppTheme
     var connectionSortMode: ConnectionSortMode
     var hidesSensitiveInfo: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case apps
+        case lastScannedAt
+        case language
+        case theme
+        case connectionSortMode
+        case hidesSensitiveInfo
+    }
+
+    init(
+        apps: [InstalledTerminalApp] = [],
+        lastScannedAt: Date? = nil,
+        language: AppLanguage = .chinese,
+        theme: AppTheme = .system,
+        connectionSortMode: ConnectionSortMode = .manual,
+        hidesSensitiveInfo: Bool = false
+    ) {
+        self.apps = apps
+        self.lastScannedAt = lastScannedAt
+        self.language = language
+        self.theme = theme
+        self.connectionSortMode = connectionSortMode
+        self.hidesSensitiveInfo = hidesSensitiveInfo
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        apps = try container.decodeIfPresent([InstalledTerminalApp].self, forKey: .apps) ?? []
+        lastScannedAt = try container.decodeIfPresent(Date.self, forKey: .lastScannedAt)
+        language = try container.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .chinese
+        theme = try container.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .system
+        connectionSortMode = try container.decodeIfPresent(ConnectionSortMode.self, forKey: .connectionSortMode) ?? .manual
+        hidesSensitiveInfo = try container.decodeIfPresent(Bool.self, forKey: .hidesSensitiveInfo) ?? false
+    }
 }
 
 @MainActor
