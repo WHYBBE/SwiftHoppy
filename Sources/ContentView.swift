@@ -191,8 +191,29 @@ struct ContentView: View {
         }
         .onAppear {
             if selectedID == nil {
-                selectedID = store.connections.first?.id
+                selectedID = store.connections.first(where: { !$0.isSeparator })?.id
             }
+        }
+        .alert(
+            t("数据错误", "Data Error"),
+            isPresented: Binding(
+                get: {
+                    store.persistenceErrorMessage != nil || preferences.persistenceErrorMessage != nil
+                },
+                set: { isPresented in
+                    if !isPresented {
+                        store.dismissPersistenceError()
+                        preferences.dismissPersistenceError()
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                store.dismissPersistenceError()
+                preferences.dismissPersistenceError()
+            }
+        } message: {
+            Text(store.persistenceErrorMessage ?? preferences.persistenceErrorMessage ?? "")
         }
     }
 
@@ -1339,18 +1360,30 @@ struct SettingsView: View {
         }
         .frame(width: 640, height: 560)
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
-            get: { !settingsErrorMessage.isEmpty },
+            get: {
+                !settingsErrorMessage.isEmpty
+                    || store.persistenceErrorMessage != nil
+                    || preferences.persistenceErrorMessage != nil
+            },
             set: { isPresented in
                 if !isPresented {
                     settingsErrorMessage = ""
+                    store.dismissPersistenceError()
+                    preferences.dismissPersistenceError()
                 }
             }
         )) {
             Button("OK") {
                 settingsErrorMessage = ""
+                store.dismissPersistenceError()
+                preferences.dismissPersistenceError()
             }
         } message: {
-            Text(settingsErrorMessage)
+            Text(
+                settingsErrorMessage.isEmpty
+                    ? (store.persistenceErrorMessage ?? preferences.persistenceErrorMessage ?? "")
+                    : settingsErrorMessage
+            )
         }
         .confirmationDialog(
             t("确认清空全部数据？", "Clear all data?"),

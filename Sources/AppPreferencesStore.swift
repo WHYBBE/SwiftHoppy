@@ -1,5 +1,19 @@
 import Foundation
 
+enum AppPreferencesStoreError: LocalizedError {
+    case loadFailed(String)
+    case saveFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .loadFailed(let detail):
+            return "偏好设置读取失败 / Failed to load preferences: \(detail)"
+        case .saveFailed(let detail):
+            return "偏好设置保存失败 / Failed to save preferences: \(detail)"
+        }
+    }
+}
+
 enum AppLanguage: String, Codable, CaseIterable, Identifiable {
     case english
     case chinese
@@ -53,18 +67,32 @@ final class AppPreferencesStore: ObservableObject {
     @Published private(set) var installedApps: [InstalledTerminalApp] = []
     @Published private(set) var lastScannedAt: Date?
     @Published var language: AppLanguage = .chinese {
-        didSet { save() }
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
     }
     @Published var theme: AppTheme = .system {
-        didSet { save() }
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
     }
     @Published var connectionSortMode: ConnectionSortMode = .manual {
-        didSet { save() }
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
     }
     @Published var hidesSensitiveInfo = false {
-        didSet { save() }
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
     }
+    @Published private(set) var persistenceErrorMessage: String?
 
+    private var isApplyingLoadedState = false
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -78,6 +106,10 @@ final class AppPreferencesStore: ObservableObject {
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
         load()
+    }
+
+    func dismissPersistenceError() {
+        persistenceErrorMessage = nil
     }
 
     func refreshInstalledApps() {
@@ -113,22 +145,42 @@ final class AppPreferencesStore: ObservableObject {
 
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
         do {
             let data = try Data(contentsOf: fileURL)
             let cache = try decoder.decode(TerminalAppCache.self, from: data)
+            isApplyingLoadedState = true
             installedApps = cache.apps
             lastScannedAt = cache.lastScannedAt
             language = cache.language
             theme = cache.theme
             connectionSortMode = cache.connectionSortMode
             hidesSensitiveInfo = cache.hidesSensitiveInfo
+            isApplyingLoadedState = false
         } catch {
-            installedApps = []
-            lastScannedAt = nil
-            language = .chinese
-            theme = .system
-            connectionSortMode = .manual
-            hidesSensitiveInfo = false
+            // Keep in-memory defaults; do not overwrite the on-disk file.
+            let backupPath = preserveCorruptFile()
+            var detail = error.localizedDescription
+            if let backupPath {
+                detail += " | backup: \(backupPath)"
+            }
+            persistenceErrorMessage = AppPreferencesStoreError.loadFailed(detail).errorDescription
+        }
+    }
+
+    private func preserveCorruptFile() -> String? {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let backupURL = fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("terminal-apps.corrupt.\(stamp).json")
+        do {
+            if FileManager.default.fileExists(atPath: backupURL.path) {
+                try FileManager.default.removeItem(at: backupURL)
+            }
+            try FileManager.default.copyItem(at: fileURL, to: backupURL)
+            return backupURL.path
+        } catch {
+            return nil
         }
     }
 
@@ -144,7 +196,12 @@ final class AppPreferencesStore: ObservableObject {
             )
             let data = try encoder.encode(cache)
             try data.write(to: fileURL, options: .atomic)
+            if persistenceErrorMessage?.contains("保存失败") == true
+                || persistenceErrorMessage?.contains("Failed to save") == true {
+                persistenceErrorMessage = nil
+            }
         } catch {
+            persistenceErrorMessage = AppPreferencesStoreError.saveFailed(error.localizedDescription).errorDescription
         }
     }
 

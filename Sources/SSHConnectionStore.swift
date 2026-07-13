@@ -2,11 +2,17 @@ import Foundation
 
 enum SSHConnectionStoreError: LocalizedError {
     case invalidImportData
+    case loadFailed(String)
+    case saveFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidImportData:
-            return "无法导入该文件，JSON 格式无效或内容不匹配。"
+            return "无法导入该文件，JSON 格式无效或内容不匹配。 / Unable to import: invalid or mismatched JSON."
+        case .loadFailed(let detail):
+            return "连接数据读取失败 / Failed to load connections: \(detail)"
+        case .saveFailed(let detail):
+            return "连接数据保存失败 / Failed to save connections: \(detail)"
         }
     }
 }
@@ -15,10 +21,14 @@ enum SSHConnectionStoreError: LocalizedError {
 final class SSHConnectionStore: ObservableObject {
     @Published var connections: [SSHConnection] = [] {
         didSet {
+            guard !isApplyingLoadedState else { return }
             save()
         }
     }
 
+    @Published private(set) var persistenceErrorMessage: String?
+
+    private var isApplyingLoadedState = false
     private let fileURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -36,40 +46,32 @@ final class SSHConnectionStore: ObservableObject {
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
 
-        load()
-        if connections.isEmpty {
-            connections = [
-                SSHConnection(
-                    name: "Production",
-                    host: "192.168.1.10",
-                    username: "root",
-                    isLocal: false,
-                    notesEntries: [
-                        NoteEntry(content: "示例记录，可直接修改或删除。")
-                    ],
-                    systemInfoHistory: [
-                        SystemInfoSnapshot(
-                            kernelVersion: "Linux 6.8.0-31-generic",
-                            updateInfo: "2026-06-10 apt upgrade"
-                        )
-                    ],
-                    manualOrder: 0
-                )
-            ]
-        } else {
+        switch load() {
+        case .missing:
+            // First launch only — never seed after a corrupt/failed load.
+            applyLoadedConnections([Self.sampleConnection])
+            save()
+        case .success(let loaded):
+            applyLoadedConnections(loaded)
             normalizeManualOrder()
+        case .failed(let message):
+            persistenceErrorMessage = message
         }
     }
 
+    func dismissPersistenceError() {
+        persistenceErrorMessage = nil
+    }
+
     func addConnection() -> SSHConnection.ID {
-        let nextOrder = (connections.map(\ .manualOrder).max() ?? -1) + 1
+        let nextOrder = (connections.map(\.manualOrder).max() ?? -1) + 1
         let connection = SSHConnection(name: "New Connection", isLocal: false, manualOrder: nextOrder)
         connections.insert(connection, at: 0)
         return connection.id
     }
 
     func addSeparator() -> SSHConnection.ID {
-        let nextOrder = (connections.map(\ .manualOrder).max() ?? -1) + 1
+        let nextOrder = (connections.map(\.manualOrder).max() ?? -1) + 1
         let separator = SSHConnection(
             name: "Divider",
             itemKind: .separator,
@@ -126,6 +128,31 @@ final class SSHConnectionStore: ObservableObject {
         connections = manuallySorted
     }
 
+    private static var sampleConnection: SSHConnection {
+        SSHConnection(
+            name: "Production",
+            host: "192.168.1.10",
+            username: "root",
+            isLocal: false,
+            notesEntries: [
+                NoteEntry(content: "示例记录，可直接修改或删除。")
+            ],
+            systemInfoHistory: [
+                SystemInfoSnapshot(
+                    kernelVersion: "Linux 6.8.0-31-generic",
+                    updateInfo: "2026-06-10 apt upgrade"
+                )
+            ],
+            manualOrder: 0
+        )
+    }
+
+    private func applyLoadedConnections(_ loaded: [SSHConnection]) {
+        isApplyingLoadedState = true
+        connections = loaded
+        isApplyingLoadedState = false
+    }
+
     private func normalizeManualOrder() {
         let normalized = connections
             .sorted {
@@ -145,13 +172,44 @@ final class SSHConnectionStore: ObservableObject {
         }
     }
 
-    private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    private enum LoadResult {
+        case missing
+        case success([SSHConnection])
+        case failed(String)
+    }
+
+    private func load() -> LoadResult {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return .missing
+        }
+
         do {
             let data = try Data(contentsOf: fileURL)
-            connections = try decoder.decode([SSHConnection].self, from: data)
+            let loaded = try decoder.decode([SSHConnection].self, from: data)
+            return .success(loaded)
         } catch {
-            connections = []
+            let backupPath = preserveCorruptFile()
+            var detail = error.localizedDescription
+            if let backupPath {
+                detail += " | backup: \(backupPath)"
+            }
+            return .failed(SSHConnectionStoreError.loadFailed(detail).errorDescription ?? detail)
+        }
+    }
+
+    private func preserveCorruptFile() -> String? {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let backupURL = fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("connections.corrupt.\(stamp).json")
+        do {
+            if FileManager.default.fileExists(atPath: backupURL.path) {
+                try FileManager.default.removeItem(at: backupURL)
+            }
+            try FileManager.default.copyItem(at: fileURL, to: backupURL)
+            return backupURL.path
+        } catch {
+            return nil
         }
     }
 
@@ -159,7 +217,12 @@ final class SSHConnectionStore: ObservableObject {
         do {
             let data = try encoder.encode(connections)
             try data.write(to: fileURL, options: .atomic)
+            if persistenceErrorMessage?.contains("保存失败") == true
+                || persistenceErrorMessage?.contains("Failed to save") == true {
+                persistenceErrorMessage = nil
+            }
         } catch {
+            persistenceErrorMessage = SSHConnectionStoreError.saveFailed(error.localizedDescription).errorDescription
         }
     }
 }
