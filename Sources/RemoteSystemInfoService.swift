@@ -90,44 +90,10 @@ enum RemoteSystemInfoService {
                 throw RemoteSystemInfoError.sshUnavailable
             }
 
-            let remoteCommand = #"""
-            printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
-            if command -v apt >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%y' /var/lib/apt/lists 2>/dev/null | head -n 1)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%Y' /var/lib/apt/lists 2>/dev/null)"
-            elif command -v dnf >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/dnf 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/dnf 2>/dev/null)"
-            elif command -v yum >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/yum 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/yum 2>/dev/null)"
-            elif command -v zypper >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/zypp 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/zypp 2>/dev/null)"
-            elif [ -f /var/log/pacman.log ]; then
-                printf 'UPDATE=%s\n' "$(tail -n 1 /var/log/pacman.log 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/log/pacman.log 2>/dev/null)"
-            elif command -v apk >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -c '%y' /lib/apk/db/installed 2>/dev/null || stat -c '%y' /var/lib/apk/db/installed 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /lib/apk/db/installed 2>/dev/null || stat -c '%Y' /var/lib/apk/db/installed 2>/dev/null)"
-            elif command -v pkg >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
-                printf 'UPDATE_TS=%s\n' "$(stat -f '%m' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%m' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
-            elif command -v sw_vers >/dev/null 2>&1; then
-                printf 'UPDATE=%s\n' "$(sw_vers 2>/dev/null | tr '\n' ' ')"
-                printf 'UPDATE_TS=\n'
-            else
-                printf 'UPDATE=\n'
-                printf 'UPDATE_TS=\n'
-            fi
-            if [ -r /proc/uptime ]; then
-                printf 'UPTIME=%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
-            elif uptime -p >/dev/null 2>&1; then
-                printf 'UPTIME=%s\n' "$(uptime -p 2>/dev/null)"
-            else
-                printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
-            fi
-            """#
+            let remoteCommand = """
+            \(Self.kernelAndUptimeProbe)
+            \(Self.lastPackageChangeProbe)
+            """
 
             let output = try runProcess(
                 executablePath: sshPath,
@@ -164,27 +130,10 @@ enum RemoteSystemInfoService {
     }
 
     private static func fetchLocal() throws -> RemoteSystemInfo {
-        let localCommand = #"""
-        printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
-        if [ -d /Library/Receipts ] || [ -d /var/db/receipts ]; then
-            printf 'UPDATE=%s\n' "$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /Library/Receipts 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/receipts 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -f '%m' /Library/Receipts 2>/dev/null || stat -f '%m' /var/db/receipts 2>/dev/null)"
-        elif command -v softwareupdate >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(softwareupdate --history 2>/dev/null | awk 'NF && $1 ~ /^[0-9]/ {line=$0} END {print line}' | tr -s ' ')"
-            printf 'UPDATE_TS=\n'
-        elif command -v sw_vers >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(sw_vers 2>/dev/null | tr '\n' ' ')"
-            printf 'UPDATE_TS=\n'
-        else
-            printf 'UPDATE=\n'
-            printf 'UPDATE_TS=\n'
-        fi
-        if command -v uptime >/dev/null 2>&1; then
-            printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
-        else
-            printf 'UPTIME=\n'
-        fi
-        """#
+        let localCommand = """
+        \(kernelAndUptimeProbe)
+        \(lastPackageChangeProbe)
+        """
 
         let output = try runProcess(
             executablePath: "/bin/zsh",
@@ -193,6 +142,194 @@ enum RemoteSystemInfoService {
             fallbackError: .localCommandFailed
         )
         return parseRemoteSystemInfoOutput(output)
+    }
+
+    /// Kernel + uptime probe shared by local and remote fetches.
+    private static var kernelAndUptimeProbe: String {
+        #"""
+        printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null || uname -srm 2>/dev/null)"
+        if [ -r /proc/uptime ]; then
+            printf 'UPTIME=%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
+        elif uptime -p >/dev/null 2>&1; then
+            printf 'UPTIME=%s\n' "$(uptime -p 2>/dev/null)"
+        else
+            printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
+        fi
+        """#
+    }
+
+    /// Detect last real package install/upgrade (not apt index refresh / cache mtime).
+    private static var lastPackageChangeProbe: String {
+        #"""
+        UPDATE_LINE=""
+        UPDATE_TS=""
+
+        # --- Debian/Ubuntu: dpkg.log records install/upgrade (not apt update) ---
+        if [ -z "$UPDATE_TS" ]; then
+            for f in /var/log/dpkg.log /var/log/dpkg.log.1; do
+                if [ -r "$f" ]; then
+                    line=$(grep -E ' (upgrade|install) ' "$f" 2>/dev/null | tail -n 1)
+                    if [ -n "$line" ]; then
+                        UPDATE_LINE="dpkg: $(echo "$line" | tr -s ' ')"
+                        ts=$(date -d "$(echo "$line" | awk '{print $1" "$2}')" +%s 2>/dev/null || true)
+                        if [ -z "$ts" ]; then
+                            ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(echo "$line" | awk '{print $1" "$2}')" +%s 2>/dev/null || true)
+                        fi
+                        if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+                        break
+                    fi
+                fi
+            done
+        fi
+
+        # apt history (transaction Start-Date) as fallback
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/apt/history.log ]; then
+            block=$(awk '
+                /^Start-Date:/ { start=$0; has_change=0 }
+                /^(Install|Upgrade|Remove|Purge):/ { has_change=1 }
+                /^End-Date:/ {
+                    if (has_change) { last_start=start; last_end=$0 }
+                }
+                END {
+                    if (last_start != "") print last_start
+                }
+            ' /var/log/apt/history.log 2>/dev/null)
+            if [ -n "$block" ]; then
+                raw=$(echo "$block" | sed 's/^Start-Date:[[:space:]]*//')
+                UPDATE_LINE="apt: $raw"
+                ts=$(date -d "$raw" +%s 2>/dev/null || true)
+                if [ -z "$ts" ]; then
+                    ts=$(date -j -f "%Y-%m-%d  %H:%M:%S" "$raw" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S" "$raw" +%s 2>/dev/null || true)
+                fi
+                if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+            fi
+        fi
+
+        # --- Fedora/RHEL: dnf history or dnf.rpm.log ---
+        if [ -z "$UPDATE_TS" ] && command -v dnf >/dev/null 2>&1; then
+            hist=$(dnf history list 2>/dev/null | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print; exit}')
+            if [ -n "$hist" ]; then
+                UPDATE_LINE="dnf: $(echo "$hist" | tr -s ' ')"
+                # Columns often: ID | Command | Date and time | ...
+                raw=$(echo "$hist" | awk -F'|' '{gsub(/^ +| +$/,"",$3); print $3}')
+                if [ -n "$raw" ]; then
+                    ts=$(date -d "$raw" +%s 2>/dev/null || true)
+                    if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+                fi
+            fi
+        fi
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/dnf.rpm.log ]; then
+            line=$(grep -E ' (Installed|Upgraded|Erased): ' /var/log/dnf.rpm.log 2>/dev/null | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="dnf.rpm: $(echo "$line" | tr -s ' ')"
+                raw=$(echo "$line" | awk '{print $1" "$2}')
+                ts=$(date -d "$raw" +%s 2>/dev/null || true)
+                if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+            fi
+        fi
+
+        # --- yum.log (older EL) ---
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/yum.log ]; then
+            line=$(grep -E ' (Installed|Updated|Erased): ' /var/log/yum.log 2>/dev/null | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="yum: $(echo "$line" | tr -s ' ')"
+                # Format: Mon DD HH:MM:SS ...
+                raw=$(echo "$line" | awk '{print $1" "$2" "$3}')
+                year=$(date +%Y)
+                ts=$(date -d "$raw $year" +%s 2>/dev/null || true)
+                if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+            fi
+        fi
+
+        # --- openSUSE: zypp history ---
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/zypp/history ]; then
+            line=$(grep -E '^\|?(install|upgrade|remove)\|' /var/log/zypp/history 2>/dev/null | tail -n 1)
+            if [ -z "$line" ]; then
+                line=$(grep -E '^(install|upgrade|remove)\|' /var/log/zypp/history 2>/dev/null | tail -n 1)
+            fi
+            # Actual format: 2024-01-15 12:34:56|install|pkg|...
+            line=$(grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' /var/log/zypp/history 2>/dev/null | grep -E '\|(install|patch|upgrade|remove)\|' | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="zypp: $(echo "$line" | tr -s ' ' | cut -c1-160)"
+                raw=$(echo "$line" | awk -F'|' '{print $1}')
+                ts=$(date -d "$raw" +%s 2>/dev/null || true)
+                if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+            fi
+        fi
+
+        # --- Arch: pacman.log ALPM install/upgrade ---
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/pacman.log ]; then
+            line=$(grep -E '\[ALPM\] (upgraded|installed) ' /var/log/pacman.log 2>/dev/null | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="pacman: $(echo "$line" | tr -s ' ' | cut -c1-160)"
+                # [2024-06-10T12:34:56+0000]
+                raw=$(echo "$line" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+                if [ -n "$raw" ]; then
+                    ts=$(date -d "$raw" +%s 2>/dev/null || true)
+                    if [ -z "$ts" ]; then
+                        ts=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$raw" +%s 2>/dev/null || true)
+                    fi
+                    if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+                fi
+            fi
+        fi
+
+        # --- Alpine: apk log ---
+        if [ -z "$UPDATE_TS" ] && [ -r /var/log/apk.log ]; then
+            line=$(tail -n 5 /var/log/apk.log 2>/dev/null | grep -E ' (OK|installing|upgrading|Purging) ' | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="apk: $(echo "$line" | tr -s ' ' | cut -c1-160)"
+                ts=$(stat -c '%Y' /var/log/apk.log 2>/dev/null || true)
+                if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+            fi
+        fi
+        # apk installed DB changes on real package ops (better than repo cache)
+        if [ -z "$UPDATE_TS" ] && command -v apk >/dev/null 2>&1; then
+            for db in /lib/apk/db/installed /var/lib/apk/db/installed; do
+                if [ -r "$db" ]; then
+                    UPDATE_LINE="apk db: $(stat -c '%y' "$db" 2>/dev/null | cut -d. -f1)"
+                    UPDATE_TS=$(stat -c '%Y' "$db" 2>/dev/null || true)
+                    break
+                fi
+            done
+        fi
+
+        # --- FreeBSD pkg: per-package install timestamp ---
+        if [ -z "$UPDATE_TS" ] && command -v pkg >/dev/null 2>&1; then
+            line=$(pkg query -a '%t %n-%v' 2>/dev/null | sort -n | tail -n 1)
+            if [ -n "$line" ]; then
+                UPDATE_LINE="pkg: $(echo "$line" | tr -s ' ')"
+                UPDATE_TS=$(echo "$line" | awk '{print $1}')
+            fi
+        fi
+
+        # --- macOS: software update history (not receipts dir mtime) ---
+        if [ -z "$UPDATE_TS" ] && command -v softwareupdate >/dev/null 2>&1; then
+            hist=$(softwareupdate --history 2>/dev/null)
+            if [ -n "$hist" ]; then
+                # Prefer lines that look like history rows with a date (skip headers)
+                line=$(echo "$hist" | awk 'NF>=3 && $0 !~ /Display Name|----|Version/ {line=$0} END {print line}' | tr -s ' ')
+                if [ -n "$line" ]; then
+                    UPDATE_LINE="macos: $line"
+                    # Try to pull a trailing date-like token; leave TS empty if unparsable
+                    raw=$(echo "$line" | grep -oE '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}[^[:space:]]*' | tail -n 1)
+                    if [ -n "$raw" ]; then
+                        ts=$(date -j -f "%m/%d/%Y" "$raw" +%s 2>/dev/null || date -j -f "%m/%d/%y" "$raw" +%s 2>/dev/null || true)
+                        if [ -n "$ts" ]; then UPDATE_TS="$ts"; fi
+                    fi
+                fi
+            fi
+        fi
+        if [ -z "$UPDATE_TS" ] && command -v sw_vers >/dev/null 2>&1; then
+            # Last resort on macOS: do not use receipts folder mtime (almost always wrong).
+            if [ -z "$UPDATE_LINE" ]; then
+                UPDATE_LINE="macos: $(sw_vers -productName 2>/dev/null) $(sw_vers -productVersion 2>/dev/null)"
+            fi
+        fi
+
+        printf 'UPDATE=%s\n' "$UPDATE_LINE"
+        printf 'UPDATE_TS=%s\n' "$UPDATE_TS"
+        """#
     }
 
     private static func parseRemoteSystemInfoOutput(_ output: String) -> RemoteSystemInfo {
