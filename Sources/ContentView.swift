@@ -406,9 +406,11 @@ struct ContentView: View {
         }
 
         let configuration = NSWorkspace.OpenConfiguration()
+        let failurePrefix = t("打开 SSH 连接失败", "Failed to open SSH connection")
         NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: appPath), configuration: configuration) { _, error in
-            if let error {
-                errorMessage = "\(t("打开 SSH 连接失败", "Failed to open SSH connection"))：\(error.localizedDescription)"
+            guard let error else { return }
+            Task { @MainActor in
+                errorMessage = "\(failurePrefix)：\(error.localizedDescription)"
             }
         }
     }
@@ -421,9 +423,11 @@ struct ContentView: View {
 
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
+        let failurePrefix = t("打开终端失败", "Failed to open terminal")
         NSWorkspace.shared.openApplication(at: targetURL, configuration: configuration) { _, error in
-            if let error {
-                errorMessage = "\(t("打开终端失败", "Failed to open terminal"))：\(error.localizedDescription)"
+            guard let error else { return }
+            Task { @MainActor in
+                errorMessage = "\(failurePrefix)：\(error.localizedDescription)"
             }
         }
     }

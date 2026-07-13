@@ -27,90 +27,101 @@ enum RemoteSystemInfoError: LocalizedError {
 
 enum RemoteSystemInfoService {
     static func fetchHardware(for connection: SSHConnection) async throws -> HardwareInfo {
-        if connection.isLocal {
-            return try fetchLocalHardware()
-        }
+        try await runDetached {
+            if connection.isLocal {
+                return try fetchLocalHardware()
+            }
 
-        let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else {
-            throw RemoteSystemInfoError.invalidHost
-        }
+            let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty else {
+                throw RemoteSystemInfoError.invalidHost
+            }
 
-        let sshPath = "/usr/bin/ssh"
-        guard FileManager.default.isExecutableFile(atPath: sshPath) else {
-            throw RemoteSystemInfoError.sshUnavailable
-        }
+            let sshPath = "/usr/bin/ssh"
+            guard FileManager.default.isExecutableFile(atPath: sshPath) else {
+                throw RemoteSystemInfoError.sshUnavailable
+            }
 
-        let output = try runProcess(
-            executablePath: sshPath,
-            arguments: sshArguments(for: connection) + [hardwareCommand],
-            environment: try askpassEnvironment(for: connection),
-            defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
-        )
-        return parseHardwareOutput(output)
+            let output = try runProcess(
+                executablePath: sshPath,
+                arguments: sshArguments(for: connection) + [hardwareCommand],
+                environment: try askpassEnvironment(for: connection),
+                defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
+            )
+            return parseHardwareOutput(output)
+        }
     }
 
     static func fetch(for connection: SSHConnection) async throws -> RemoteSystemInfo {
-        if connection.isLocal {
-            return try fetchLocal()
+        try await runDetached {
+            if connection.isLocal {
+                return try fetchLocal()
+            }
+
+            let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty else {
+                throw RemoteSystemInfoError.invalidHost
+            }
+
+            let sshPath = "/usr/bin/ssh"
+            guard FileManager.default.isExecutableFile(atPath: sshPath) else {
+                throw RemoteSystemInfoError.sshUnavailable
+            }
+
+            let remoteCommand = #"""
+            printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
+            if command -v apt >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%y' /var/lib/apt/lists 2>/dev/null | head -n 1)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%Y' /var/lib/apt/lists 2>/dev/null)"
+            elif command -v dnf >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/dnf 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/dnf 2>/dev/null)"
+            elif command -v yum >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/yum 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/yum 2>/dev/null)"
+            elif command -v zypper >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/zypp 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/zypp 2>/dev/null)"
+            elif [ -f /var/log/pacman.log ]; then
+                printf 'UPDATE=%s\n' "$(tail -n 1 /var/log/pacman.log 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/log/pacman.log 2>/dev/null)"
+            elif command -v apk >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -c '%y' /lib/apk/db/installed 2>/dev/null || stat -c '%y' /var/lib/apk/db/installed 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /lib/apk/db/installed 2>/dev/null || stat -c '%Y' /var/lib/apk/db/installed 2>/dev/null)"
+            elif command -v pkg >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
+                printf 'UPDATE_TS=%s\n' "$(stat -f '%m' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%m' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
+            elif command -v sw_vers >/dev/null 2>&1; then
+                printf 'UPDATE=%s\n' "$(sw_vers 2>/dev/null | tr '\n' ' ')"
+                printf 'UPDATE_TS=\n'
+            else
+                printf 'UPDATE=\n'
+                printf 'UPDATE_TS=\n'
+            fi
+            if [ -r /proc/uptime ]; then
+                printf 'UPTIME=%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
+            elif uptime -p >/dev/null 2>&1; then
+                printf 'UPTIME=%s\n' "$(uptime -p 2>/dev/null)"
+            else
+                printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
+            fi
+            """#
+
+            let output = try runProcess(
+                executablePath: sshPath,
+                arguments: sshArguments(for: connection) + [remoteCommand],
+                environment: try askpassEnvironment(for: connection),
+                defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
+            )
+            return parseRemoteSystemInfoOutput(output)
         }
+    }
 
-        let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else {
-            throw RemoteSystemInfoError.invalidHost
-        }
-
-        let sshPath = "/usr/bin/ssh"
-        guard FileManager.default.isExecutableFile(atPath: sshPath) else {
-            throw RemoteSystemInfoError.sshUnavailable
-        }
-
-        let remoteCommand = #"""
-        printf 'KERNEL=%s\n' "$(uname -srmo 2>/dev/null)"
-        if command -v apt >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%y' /var/lib/apt/lists 2>/dev/null | head -n 1)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c '%Y' /var/lib/apt/lists 2>/dev/null)"
-        elif command -v dnf >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/dnf 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/dnf 2>/dev/null)"
-        elif command -v yum >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/yum 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/yum 2>/dev/null)"
-        elif command -v zypper >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -c '%y' /var/cache/zypp 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/cache/zypp 2>/dev/null)"
-        elif [ -f /var/log/pacman.log ]; then
-            printf 'UPDATE=%s\n' "$(tail -n 1 /var/log/pacman.log 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /var/log/pacman.log 2>/dev/null)"
-        elif command -v apk >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -c '%y' /lib/apk/db/installed 2>/dev/null || stat -c '%y' /var/lib/apk/db/installed 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -c '%Y' /lib/apk/db/installed 2>/dev/null || stat -c '%Y' /var/lib/apk/db/installed 2>/dev/null)"
-        elif command -v pkg >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
-            printf 'UPDATE_TS=%s\n' "$(stat -f '%m' /var/db/pkg/local.sqlite 2>/dev/null || stat -f '%m' /var/db/pkg/repo-FreeBSD.sqlite 2>/dev/null)"
-        elif command -v sw_vers >/dev/null 2>&1; then
-            printf 'UPDATE=%s\n' "$(sw_vers 2>/dev/null | tr '\n' ' ')"
-            printf 'UPDATE_TS=\n'
-        else
-            printf 'UPDATE=\n'
-            printf 'UPDATE_TS=\n'
-        fi
-        if [ -r /proc/uptime ]; then
-            printf 'UPTIME=%s\n' "$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
-        elif uptime -p >/dev/null 2>&1; then
-            printf 'UPTIME=%s\n' "$(uptime -p 2>/dev/null)"
-        else
-            printf 'UPTIME=%s\n' "$(uptime 2>/dev/null)"
-        fi
-        """#
-
-        let output = try runProcess(
-            executablePath: sshPath,
-            arguments: sshArguments(for: connection) + [remoteCommand],
-            environment: try askpassEnvironment(for: connection),
-            defaultErrorMessage: "SSH 连接失败，请检查密钥、known_hosts 或远端可达性。"
-        )
-        return parseRemoteSystemInfoOutput(output)
+    /// Runs blocking process I/O off the cooperative pool / main actor so SwiftUI stays responsive.
+    private static func runDetached<T: Sendable>(_ work: @Sendable @escaping () throws -> T) async throws -> T {
+        try await Task.detached(priority: .userInitiated) {
+            try work()
+        }.value
     }
 
     private static func fetchLocalHardware() throws -> HardwareInfo {
