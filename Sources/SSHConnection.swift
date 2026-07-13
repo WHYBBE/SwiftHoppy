@@ -172,6 +172,10 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var systemInfoHistory: [SystemInfoSnapshot]
     var hardwareInfo: HardwareInfo?
     var preferredAppPath: String
+    /// nil = use app default from settings.
+    var hostKeyPolicy: SSHHostKeyPolicy?
+    /// nil = use app default from settings.
+    var passwordAuthPolicy: SSHPasswordAuthPolicy?
     var itemKind: SSHSidebarItemKind
     var manualOrder: Int
     var createdAt: Date
@@ -189,6 +193,8 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case systemInfoHistory
         case hardwareInfo
         case preferredAppPath
+        case hostKeyPolicy
+        case passwordAuthPolicy
         case itemKind
         case manualOrder
         case createdAt
@@ -207,6 +213,8 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         systemInfoHistory: [SystemInfoSnapshot] = [],
         hardwareInfo: HardwareInfo? = nil,
         preferredAppPath: String = "",
+        hostKeyPolicy: SSHHostKeyPolicy? = nil,
+        passwordAuthPolicy: SSHPasswordAuthPolicy? = nil,
         itemKind: SSHSidebarItemKind = .connection,
         manualOrder: Int = 0,
         createdAt: Date = .now,
@@ -223,6 +231,8 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.systemInfoHistory = systemInfoHistory
         self.hardwareInfo = hardwareInfo
         self.preferredAppPath = preferredAppPath
+        self.hostKeyPolicy = hostKeyPolicy
+        self.passwordAuthPolicy = passwordAuthPolicy
         self.itemKind = itemKind
         self.manualOrder = manualOrder
         self.createdAt = createdAt
@@ -240,6 +250,8 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         noteSortMode = try container.decodeIfPresent(NoteSortMode.self, forKey: .noteSortMode) ?? .time
         notesEntries = try container.decodeIfPresent([NoteEntry].self, forKey: .notesEntries) ?? []
         preferredAppPath = try container.decodeIfPresent(String.self, forKey: .preferredAppPath) ?? ""
+        hostKeyPolicy = try container.decodeIfPresent(SSHHostKeyPolicy.self, forKey: .hostKeyPolicy)
+        passwordAuthPolicy = try container.decodeIfPresent(SSHPasswordAuthPolicy.self, forKey: .passwordAuthPolicy)
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
         manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
@@ -261,6 +273,8 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encodeIfPresent(hardwareInfo, forKey: .hardwareInfo)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
+        try container.encodeIfPresent(hostKeyPolicy, forKey: .hostKeyPolicy)
+        try container.encodeIfPresent(passwordAuthPolicy, forKey: .passwordAuthPolicy)
         try container.encode(itemKind, forKey: .itemKind)
         try container.encode(manualOrder, forKey: .manualOrder)
         try container.encode(createdAt, forKey: .createdAt)

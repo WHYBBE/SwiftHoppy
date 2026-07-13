@@ -42,7 +42,10 @@ enum RemoteSystemInfoError: LocalizedError {
 }
 
 enum RemoteSystemInfoService {
-    static func fetchHardware(for connection: SSHConnection) async throws -> HardwareInfo {
+    static func fetchHardware(
+        for connection: SSHConnection,
+        security: ResolvedSSHSecurity
+    ) async throws -> HardwareInfo {
         try await runDetached {
             if connection.isLocal {
                 return try fetchLocalHardware()
@@ -60,15 +63,18 @@ enum RemoteSystemInfoService {
 
             let output = try runProcess(
                 executablePath: sshPath,
-                arguments: sshArguments(for: connection) + [hardwareCommand],
-                environment: try askpassEnvironment(for: connection),
+                arguments: sshArguments(for: connection, security: security) + [hardwareCommand],
+                environment: try processEnvironment(for: connection, security: security),
                 fallbackError: .connectionFailed
             )
             return parseHardwareOutput(output)
         }
     }
 
-    static func fetch(for connection: SSHConnection) async throws -> RemoteSystemInfo {
+    static func fetch(
+        for connection: SSHConnection,
+        security: ResolvedSSHSecurity
+    ) async throws -> RemoteSystemInfo {
         try await runDetached {
             if connection.isLocal {
                 return try fetchLocal()
@@ -125,8 +131,8 @@ enum RemoteSystemInfoService {
 
             let output = try runProcess(
                 executablePath: sshPath,
-                arguments: sshArguments(for: connection) + [remoteCommand],
-                environment: try askpassEnvironment(for: connection),
+                arguments: sshArguments(for: connection, security: security) + [remoteCommand],
+                environment: try processEnvironment(for: connection, security: security),
                 fallbackError: .connectionFailed
             )
             return parseRemoteSystemInfoOutput(output)
@@ -466,13 +472,36 @@ enum RemoteSystemInfoService {
     }
 
 
-    private static func sshArguments(for connection: SSHConnection) -> [String] {
+    private static func sshArguments(
+        for connection: SSHConnection,
+        security: ResolvedSSHSecurity
+    ) -> [String] {
         var arguments = [
-            "-o", "PreferredAuthentications=publickey,keyboard-interactive,password",
-            "-o", "NumberOfPasswordPrompts=1",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "StrictHostKeyChecking=\(security.hostKeyPolicy.sshOptionValue)",
             "-o", "ConnectTimeout=8"
         ]
+
+        switch security.passwordAuthPolicy {
+        case .allowPasswordPrompt:
+            arguments += [
+                "-o", "PreferredAuthentications=publickey,keyboard-interactive,password",
+                "-o", "NumberOfPasswordPrompts=1",
+                "-o", "BatchMode=no"
+            ]
+        case .publicKeyOnly:
+            arguments += [
+                "-o", "PreferredAuthentications=publickey",
+                "-o", "PubkeyAuthentication=yes",
+                "-o", "PasswordAuthentication=no",
+                "-o", "KbdInteractiveAuthentication=no",
+                "-o", "NumberOfPasswordPrompts=0",
+                "-o", "BatchMode=yes"
+            ]
+        }
+
+        if security.hostKeyPolicy == .off {
+            arguments += ["-o", "UserKnownHostsFile=/dev/null"]
+        }
 
         if connection.port != 22 {
             arguments += ["-p", String(connection.port)]
@@ -482,14 +511,27 @@ enum RemoteSystemInfoService {
         return arguments
     }
 
-    private static func askpassEnvironment(for connection: SSHConnection) throws -> [String: String] {
-        let helperURL = try makeAskpassHelper()
+    private static func processEnvironment(
+        for connection: SSHConnection,
+        security: ResolvedSSHSecurity
+    ) throws -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        environment["SSH_ASKPASS"] = helperURL.path
-        environment["SSH_ASKPASS_REQUIRE"] = "force"
-        environment["SSH_ASKPASS_PROMPT"] = "Enter SSH password for \(connection.destination)"
         environment["LC_ALL"] = "en_US.UTF-8"
         environment["LANG"] = "en_US.UTF-8"
+
+        switch security.passwordAuthPolicy {
+        case .allowPasswordPrompt:
+            let helperURL = try makeAskpassHelper()
+            environment["SSH_ASKPASS"] = helperURL.path
+            environment["SSH_ASKPASS_REQUIRE"] = "force"
+            environment["SSH_ASKPASS_PROMPT"] = "Enter SSH password for \(connection.destination)"
+        case .publicKeyOnly:
+            environment.removeValue(forKey: "SSH_ASKPASS")
+            environment.removeValue(forKey: "SSH_ASKPASS_REQUIRE")
+            environment.removeValue(forKey: "SSH_ASKPASS_PROMPT")
+            environment["SSH_ASKPASS_REQUIRE"] = "never"
+        }
+
         return environment
     }
 

@@ -1035,7 +1035,8 @@ struct ConnectionDetailView: View {
 
         systemInfoFetchTask = Task {
             do {
-                let info = try await RemoteSystemInfoService.fetch(for: snapshot)
+                let security = preferences.resolvedSecurity(for: snapshot)
+                let info = try await RemoteSystemInfoService.fetch(for: snapshot, security: security)
                 guard !Task.isCancelled else { return }
                 draft.systemInfoHistory.insert(
                     SystemInfoSnapshot(
@@ -1072,7 +1073,8 @@ struct ConnectionDetailView: View {
 
         hardwareInfoFetchTask = Task {
             do {
-                let info = try await RemoteSystemInfoService.fetchHardware(for: snapshot)
+                let security = preferences.resolvedSecurity(for: snapshot)
+                let info = try await RemoteSystemInfoService.fetchHardware(for: snapshot, security: security)
                 guard !Task.isCancelled else { return }
                 draft.hardwareInfo = info
                 isFetchingHardwareInfo = false
@@ -1187,6 +1189,34 @@ struct ConnectionInfoEditorView: View {
                     }
                 }
 
+                if !draft.isLocal {
+                    Section {
+                        Picker(t("主机密钥", "Host key"), selection: hostKeyPolicyBinding) {
+                            Text(t("跟随全局设置", "Use app default")).tag(Optional<SSHHostKeyPolicy>.none)
+                            ForEach(SSHHostKeyPolicy.allCases) { policy in
+                                Text(policy.title(language: preferences.language)).tag(Optional(policy))
+                            }
+                        }
+
+                        Text((draft.hostKeyPolicy ?? preferences.defaultHostKeyPolicy).detail(language: preferences.language))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Picker(t("密码认证", "Password auth"), selection: passwordAuthPolicyBinding) {
+                            Text(t("跟随全局设置", "Use app default")).tag(Optional<SSHPasswordAuthPolicy>.none)
+                            ForEach(SSHPasswordAuthPolicy.allCases) { policy in
+                                Text(policy.title(language: preferences.language)).tag(Optional(policy))
+                            }
+                        }
+
+                        Text((draft.passwordAuthPolicy ?? preferences.defaultPasswordAuthPolicy).detail(language: preferences.language))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } header: {
+                        Text(t("SSH 安全（本连接）", "SSH Security (this connection)"))
+                    }
+                }
+
                 if !validationMessage.isEmpty {
                     Section {
                         Text(validationMessage)
@@ -1196,7 +1226,7 @@ struct ConnectionInfoEditorView: View {
                 }
             }
             .formStyle(.grouped)
-            .frame(width: 520, height: 440)
+            .frame(width: 560, height: 560)
             .navigationTitle(t("编辑信息", "Edit Info"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1216,6 +1246,20 @@ struct ConnectionInfoEditorView: View {
                 }
             }
         }
+    }
+
+    private var hostKeyPolicyBinding: Binding<SSHHostKeyPolicy?> {
+        Binding(
+            get: { draft.hostKeyPolicy },
+            set: { draft.hostKeyPolicy = $0 }
+        )
+    }
+
+    private var passwordAuthPolicyBinding: Binding<SSHPasswordAuthPolicy?> {
+        Binding(
+            get: { draft.passwordAuthPolicy },
+            set: { draft.passwordAuthPolicy = $0 }
+        )
     }
 
     private func chooseApplicationForDraft() {
@@ -1479,6 +1523,41 @@ struct SettingsView: View {
                             Text(t("浅色", "Light")).tag(AppTheme.light)
                             Text(t("深色", "Dark")).tag(AppTheme.dark)
                         }
+                    }
+
+                    settingsCard(title: t("SSH 安全（全局默认）", "SSH Security (defaults)"), icon: "lock.shield") {
+                        Picker(t("主机密钥校验", "Host key checking"), selection: Binding(
+                            get: { preferences.defaultHostKeyPolicy },
+                            set: { preferences.setDefaultHostKeyPolicy($0) }
+                        )) {
+                            ForEach(SSHHostKeyPolicy.allCases) { policy in
+                                Text(policy.title(language: preferences.language)).tag(policy)
+                            }
+                        }
+
+                        Text(preferences.defaultHostKeyPolicy.detail(language: preferences.language))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Picker(t("密码认证", "Password authentication"), selection: Binding(
+                            get: { preferences.defaultPasswordAuthPolicy },
+                            set: { preferences.setDefaultPasswordAuthPolicy($0) }
+                        )) {
+                            ForEach(SSHPasswordAuthPolicy.allCases) { policy in
+                                Text(policy.title(language: preferences.language)).tag(policy)
+                            }
+                        }
+
+                        Text(preferences.defaultPasswordAuthPolicy.detail(language: preferences.language))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text(t(
+                            "每条连接可在「编辑信息」中覆盖这些默认值。",
+                            "Each connection can override these defaults in Edit Info."
+                        ))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     }
 
                     settingsCard(title: t("终端应用", "Terminal Apps"), icon: "terminal") {

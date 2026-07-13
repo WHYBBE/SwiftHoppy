@@ -61,6 +61,99 @@ enum ConnectionSortMode: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Maps to OpenSSH `StrictHostKeyChecking`.
+enum SSHHostKeyPolicy: String, Codable, CaseIterable, Identifiable {
+    /// Reject unknown hosts (must already be in known_hosts).
+    case strict
+    /// Trust unknown hosts once and record them (previous app default).
+    case acceptNew
+    /// Do not verify host keys (lab only).
+    case off
+
+    var id: String { rawValue }
+
+    var sshOptionValue: String {
+        switch self {
+        case .strict:
+            return "yes"
+        case .acceptNew:
+            return "accept-new"
+        case .off:
+            return "no"
+        }
+    }
+
+    func title(language: AppLanguage) -> String {
+        switch self {
+        case .strict:
+            return language.text("严格（仅 known_hosts）", "Strict (known_hosts only)")
+        case .acceptNew:
+            return language.text("接受新主机", "Accept new hosts")
+        case .off:
+            return language.text("关闭校验（不安全）", "Off (insecure)")
+        }
+    }
+
+    func detail(language: AppLanguage) -> String {
+        switch self {
+        case .strict:
+            return language.text(
+                "未知主机拒绝连接；指纹变化时拒绝。最安全。",
+                "Reject unknown hosts; reject changed fingerprints. Most secure."
+            )
+        case .acceptNew:
+            return language.text(
+                "首次连接自动信任并写入 known_hosts；指纹变化时仍会拒绝。",
+                "Auto-trust first connection into known_hosts; still rejects changed fingerprints."
+            )
+        case .off:
+            return language.text(
+                "不校验主机密钥，仅建议在隔离实验环境使用。",
+                "Skip host-key checks. Use only in isolated lab environments."
+            )
+        }
+    }
+}
+
+/// How password / interactive auth is handled for in-app SSH fetches.
+enum SSHPasswordAuthPolicy: String, Codable, CaseIterable, Identifiable {
+    /// Prefer keys; fall back to graphical askpass password prompt.
+    case allowPasswordPrompt
+    /// Public key / agent only; never run askpass.
+    case publicKeyOnly
+
+    var id: String { rawValue }
+
+    func title(language: AppLanguage) -> String {
+        switch self {
+        case .allowPasswordPrompt:
+            return language.text("允许密码提示", "Allow password prompt")
+        case .publicKeyOnly:
+            return language.text("仅公钥 / Agent", "Public key / agent only")
+        }
+    }
+
+    func detail(language: AppLanguage) -> String {
+        switch self {
+        case .allowPasswordPrompt:
+            return language.text(
+                "无密钥时用图形对话框询问密码（经临时 askpass）。",
+                "If no key works, show a graphical password dialog via temporary askpass."
+            )
+        case .publicKeyOnly:
+            return language.text(
+                "只用密钥与 ssh-agent，不弹出密码框，也不使用 askpass。",
+                "Use keys and ssh-agent only; no password dialog or askpass."
+            )
+        }
+    }
+}
+
+struct ResolvedSSHSecurity: Equatable {
+    var hostKeyPolicy: SSHHostKeyPolicy
+    var passwordAuthPolicy: SSHPasswordAuthPolicy
+}
+
 struct InstalledTerminalApp: Identifiable, Hashable, Codable {
     let path: String
     let name: String
@@ -75,6 +168,8 @@ struct TerminalAppCache: Codable {
     var theme: AppTheme
     var connectionSortMode: ConnectionSortMode
     var hidesSensitiveInfo: Bool
+    var defaultHostKeyPolicy: SSHHostKeyPolicy
+    var defaultPasswordAuthPolicy: SSHPasswordAuthPolicy
 
     enum CodingKeys: String, CodingKey {
         case apps
@@ -83,6 +178,8 @@ struct TerminalAppCache: Codable {
         case theme
         case connectionSortMode
         case hidesSensitiveInfo
+        case defaultHostKeyPolicy
+        case defaultPasswordAuthPolicy
     }
 
     init(
@@ -91,7 +188,9 @@ struct TerminalAppCache: Codable {
         language: AppLanguage = .chinese,
         theme: AppTheme = .system,
         connectionSortMode: ConnectionSortMode = .manual,
-        hidesSensitiveInfo: Bool = false
+        hidesSensitiveInfo: Bool = false,
+        defaultHostKeyPolicy: SSHHostKeyPolicy = .acceptNew,
+        defaultPasswordAuthPolicy: SSHPasswordAuthPolicy = .allowPasswordPrompt
     ) {
         self.apps = apps
         self.lastScannedAt = lastScannedAt
@@ -99,6 +198,8 @@ struct TerminalAppCache: Codable {
         self.theme = theme
         self.connectionSortMode = connectionSortMode
         self.hidesSensitiveInfo = hidesSensitiveInfo
+        self.defaultHostKeyPolicy = defaultHostKeyPolicy
+        self.defaultPasswordAuthPolicy = defaultPasswordAuthPolicy
     }
 
     init(from decoder: Decoder) throws {
@@ -109,6 +210,8 @@ struct TerminalAppCache: Codable {
         theme = try container.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .system
         connectionSortMode = try container.decodeIfPresent(ConnectionSortMode.self, forKey: .connectionSortMode) ?? .manual
         hidesSensitiveInfo = try container.decodeIfPresent(Bool.self, forKey: .hidesSensitiveInfo) ?? false
+        defaultHostKeyPolicy = try container.decodeIfPresent(SSHHostKeyPolicy.self, forKey: .defaultHostKeyPolicy) ?? .acceptNew
+        defaultPasswordAuthPolicy = try container.decodeIfPresent(SSHPasswordAuthPolicy.self, forKey: .defaultPasswordAuthPolicy) ?? .allowPasswordPrompt
     }
 }
 
@@ -135,6 +238,18 @@ final class AppPreferencesStore: ObservableObject {
         }
     }
     @Published var hidesSensitiveInfo = false {
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
+    }
+    @Published var defaultHostKeyPolicy: SSHHostKeyPolicy = .acceptNew {
+        didSet {
+            guard !isApplyingLoadedState else { return }
+            save()
+        }
+    }
+    @Published var defaultPasswordAuthPolicy: SSHPasswordAuthPolicy = .allowPasswordPrompt {
         didSet {
             guard !isApplyingLoadedState else { return }
             save()
@@ -188,6 +303,21 @@ final class AppPreferencesStore: ObservableObject {
         self.hidesSensitiveInfo = hidesSensitiveInfo
     }
 
+    func setDefaultHostKeyPolicy(_ policy: SSHHostKeyPolicy) {
+        defaultHostKeyPolicy = policy
+    }
+
+    func setDefaultPasswordAuthPolicy(_ policy: SSHPasswordAuthPolicy) {
+        defaultPasswordAuthPolicy = policy
+    }
+
+    func resolvedSecurity(for connection: SSHConnection) -> ResolvedSSHSecurity {
+        ResolvedSSHSecurity(
+            hostKeyPolicy: connection.hostKeyPolicy ?? defaultHostKeyPolicy,
+            passwordAuthPolicy: connection.passwordAuthPolicy ?? defaultPasswordAuthPolicy
+        )
+    }
+
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
@@ -201,6 +331,8 @@ final class AppPreferencesStore: ObservableObject {
             theme = cache.theme
             connectionSortMode = cache.connectionSortMode
             hidesSensitiveInfo = cache.hidesSensitiveInfo
+            defaultHostKeyPolicy = cache.defaultHostKeyPolicy
+            defaultPasswordAuthPolicy = cache.defaultPasswordAuthPolicy
             isApplyingLoadedState = false
         } catch {
             // Keep in-memory defaults; do not overwrite the on-disk file.
@@ -237,7 +369,9 @@ final class AppPreferencesStore: ObservableObject {
                 language: language,
                 theme: theme,
                 connectionSortMode: connectionSortMode,
-                hidesSensitiveInfo: hidesSensitiveInfo
+                hidesSensitiveInfo: hidesSensitiveInfo,
+                defaultHostKeyPolicy: defaultHostKeyPolicy,
+                defaultPasswordAuthPolicy: defaultPasswordAuthPolicy
             )
             let data = try encoder.encode(cache)
             try data.write(to: fileURL, options: .atomic)
