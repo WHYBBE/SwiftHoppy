@@ -172,6 +172,12 @@ struct SSHConnection: Identifiable, Codable, Hashable {
     var systemInfoHistory: [SystemInfoSnapshot]
     var hardwareInfo: HardwareInfo?
     var preferredAppPath: String
+    /// Path to private key (`-i`). Empty = system default.
+    var identityFile: String
+    /// ProxyJump host list (`-J`), e.g. `bastion` or `user@jump:22`.
+    var proxyJump: String
+    /// Extra OpenSSH `-o` options, one per line (`Key=value` or `Key value`).
+    var extraSSHOptions: String
     /// nil = use app default from settings.
     var hostKeyPolicy: SSHHostKeyPolicy?
     /// nil = use app default from settings.
@@ -193,6 +199,9 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         case systemInfoHistory
         case hardwareInfo
         case preferredAppPath
+        case identityFile
+        case proxyJump
+        case extraSSHOptions
         case hostKeyPolicy
         case passwordAuthPolicy
         case itemKind
@@ -213,6 +222,9 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         systemInfoHistory: [SystemInfoSnapshot] = [],
         hardwareInfo: HardwareInfo? = nil,
         preferredAppPath: String = "",
+        identityFile: String = "",
+        proxyJump: String = "",
+        extraSSHOptions: String = "",
         hostKeyPolicy: SSHHostKeyPolicy? = nil,
         passwordAuthPolicy: SSHPasswordAuthPolicy? = nil,
         itemKind: SSHSidebarItemKind = .connection,
@@ -231,6 +243,9 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         self.systemInfoHistory = systemInfoHistory
         self.hardwareInfo = hardwareInfo
         self.preferredAppPath = preferredAppPath
+        self.identityFile = identityFile
+        self.proxyJump = proxyJump
+        self.extraSSHOptions = extraSSHOptions
         self.hostKeyPolicy = hostKeyPolicy
         self.passwordAuthPolicy = passwordAuthPolicy
         self.itemKind = itemKind
@@ -250,6 +265,9 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         noteSortMode = try container.decodeIfPresent(NoteSortMode.self, forKey: .noteSortMode) ?? .time
         notesEntries = try container.decodeIfPresent([NoteEntry].self, forKey: .notesEntries) ?? []
         preferredAppPath = try container.decodeIfPresent(String.self, forKey: .preferredAppPath) ?? ""
+        identityFile = try container.decodeIfPresent(String.self, forKey: .identityFile) ?? ""
+        proxyJump = try container.decodeIfPresent(String.self, forKey: .proxyJump) ?? ""
+        extraSSHOptions = try container.decodeIfPresent(String.self, forKey: .extraSSHOptions) ?? ""
         hostKeyPolicy = try container.decodeIfPresent(SSHHostKeyPolicy.self, forKey: .hostKeyPolicy)
         passwordAuthPolicy = try container.decodeIfPresent(SSHPasswordAuthPolicy.self, forKey: .passwordAuthPolicy)
         itemKind = try container.decodeIfPresent(SSHSidebarItemKind.self, forKey: .itemKind) ?? .connection
@@ -273,6 +291,9 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         try container.encode(systemInfoHistory, forKey: .systemInfoHistory)
         try container.encodeIfPresent(hardwareInfo, forKey: .hardwareInfo)
         try container.encode(preferredAppPath, forKey: .preferredAppPath)
+        try container.encode(identityFile, forKey: .identityFile)
+        try container.encode(proxyJump, forKey: .proxyJump)
+        try container.encode(extraSSHOptions, forKey: .extraSSHOptions)
         try container.encodeIfPresent(hostKeyPolicy, forKey: .hostKeyPolicy)
         try container.encodeIfPresent(passwordAuthPolicy, forKey: .passwordAuthPolicy)
         try container.encode(itemKind, forKey: .itemKind)
@@ -328,6 +349,58 @@ struct SSHConnection: Identifiable, Codable, Hashable {
         if !(1...65_535).contains(port) {
             return language.text("端口必须在 1–65535 之间。", "Port must be between 1 and 65535.")
         }
+
+        let identity = identityFile.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !identity.isEmpty {
+            let expanded = (identity as NSString).expandingTildeInPath
+            if !FileManager.default.fileExists(atPath: expanded) {
+                return language.text("IdentityFile 路径不存在。", "IdentityFile path does not exist.")
+            }
+        }
+
+        for line in extraSSHOptionLines {
+            if line.hasPrefix("-") {
+                return language.text(
+                    "自定义参数请使用 Key=value 形式（不要写 -o）。",
+                    "Use Key=value lines for extra options (do not include -o)."
+                )
+            }
+        }
         return nil
+    }
+
+    var expandedIdentityFile: String? {
+        let trimmed = identityFile.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
+    var trimmedProxyJump: String? {
+        let trimmed = proxyJump.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Normalized OpenSSH option bodies for `-o` (e.g. `IdentitiesOnly=yes`).
+    var extraSSHOptionLines: [String] {
+        extraSSHOptions
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            .compactMap { line -> String? in
+                var value = line
+                if value.hasPrefix("-o") {
+                    value = value.dropFirst(2).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard !value.isEmpty else { return nil }
+                if value.contains("=") {
+                    return value
+                }
+                // "Key Value" -> "Key=Value"
+                let parts = value.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                if parts.count == 2 {
+                    return "\(parts[0])=\(parts[1])"
+                }
+                return value
+            }
     }
 }

@@ -640,6 +640,30 @@ enum RemoteSystemInfoService {
             arguments += ["-o", "UserKnownHostsFile=/dev/null"]
         }
 
+        if let identity = connection.expandedIdentityFile {
+            arguments += ["-i", identity]
+            // Avoid trying every default key when a specific identity is set.
+            if !connection.extraSSHOptionLines.contains(where: { $0.lowercased().hasPrefix("identitiesonly=") }) {
+                arguments += ["-o", "IdentitiesOnly=yes"]
+            }
+        }
+
+        if let jump = connection.trimmedProxyJump {
+            arguments += ["-J", jump]
+        }
+
+        for option in connection.extraSSHOptionLines {
+            let lower = option.lowercased()
+            // Avoid overriding policies already set by the app security settings.
+            if lower.hasPrefix("stricthostkeychecking=") { continue }
+            if lower.hasPrefix("userknownhostsfile=") && security.hostKeyPolicy == .off { continue }
+            if lower.hasPrefix("batchmode=") { continue }
+            if lower.hasPrefix("passwordauthentication=") { continue }
+            if lower.hasPrefix("preferredauthentications=") { continue }
+            if lower.hasPrefix("numberofpasswordprompts=") { continue }
+            arguments += ["-o", option]
+        }
+
         if connection.port != 22 {
             arguments += ["-p", String(connection.port)]
         }

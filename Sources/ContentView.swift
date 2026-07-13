@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedID: SSHConnection.ID?
     @State private var errorMessage = ""
+    @State private var showSSHConfigImporter = false
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
@@ -160,8 +161,17 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 320)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        selectedID = store.addConnection()
+                    Menu {
+                        Button {
+                            selectedID = store.addConnection()
+                        } label: {
+                            Label(t("新增连接", "New Connection"), systemImage: "plus")
+                        }
+                        Button {
+                            showSSHConfigImporter = true
+                        } label: {
+                            Label(t("从 ~/.ssh/config 导入", "Import from ~/.ssh/config"), systemImage: "square.and.arrow.down.on.square")
+                        }
                     } label: {
                         Label(t("新增", "Add"), systemImage: "plus")
                     }
@@ -194,6 +204,21 @@ struct ContentView: View {
         }
         .onChange(of: store.connections) { _ in
             reconcileSelection()
+        }
+        .sheet(isPresented: $showSSHConfigImporter) {
+            SSHConfigImportView { selected in
+                let result = store.importSSHConfigEntries(selected)
+                if result.added > 0 {
+                    selectedID = store.firstSelectableID
+                }
+                showSSHConfigImporter = false
+                if result.added == 0 && result.skipped > 0 {
+                    errorMessage = t(
+                        "所选主机均已存在，未新增。",
+                        "All selected hosts already exist; nothing was added."
+                    )
+                }
+            }
         }
         .alert(
             t("数据错误", "Data Error"),
@@ -1191,6 +1216,33 @@ struct ConnectionInfoEditorView: View {
 
                 if !draft.isLocal {
                     Section {
+                        HStack {
+                            TextField(t("IdentityFile", "IdentityFile"), text: $draft.identityFile)
+                            Button(t("选择…", "Choose…")) {
+                                chooseIdentityFile()
+                            }
+                        }
+                        TextField(t("ProxyJump", "ProxyJump"), text: $draft.proxyJump)
+                            .textFieldStyle(.roundedBorder)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(t("额外 -o 选项（每行一项）", "Extra -o options (one per line)"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: $draft.extraSSHOptions)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(minHeight: 72, maxHeight: 100)
+                        }
+                        Text(t(
+                            "例如 IdentitiesOnly=yes 或 ForwardAgent=yes。不要写 -o 前缀。",
+                            "Example: IdentitiesOnly=yes or ForwardAgent=yes. Do not include the -o prefix."
+                        ))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    } header: {
+                        Text(t("SSH 进阶", "SSH Advanced"))
+                    }
+
+                    Section {
                         Picker(t("主机密钥", "Host key"), selection: hostKeyPolicyBinding) {
                             Text(t("跟随全局设置", "Use app default")).tag(Optional<SSHHostKeyPolicy>.none)
                             ForEach(SSHHostKeyPolicy.allCases) { policy in
@@ -1226,7 +1278,7 @@ struct ConnectionInfoEditorView: View {
                 }
             }
             .formStyle(.grouped)
-            .frame(width: 560, height: 560)
+            .frame(width: 580, height: 640)
             .navigationTitle(t("编辑信息", "Edit Info"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1270,6 +1322,142 @@ struct ConnectionInfoEditorView: View {
         panel.allowedContentTypes = [.application]
         if panel.runModal() == .OK {
             draft.preferredAppPath = panel.url?.path ?? ""
+        }
+    }
+
+    private func chooseIdentityFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
+        if panel.runModal() == .OK, let path = panel.url?.path {
+            draft.identityFile = path
+        }
+    }
+}
+
+struct SSHConfigImportView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    @State private var entries: [SSHConfigHostEntry] = []
+    @State private var selection = Set<String>()
+    @State private var loadError = ""
+    @State private var configPath = SSHConfigImporter.defaultConfigURL.path
+    let onImport: ([SSHConfigHostEntry]) -> Void
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(configPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button(t("其他文件…", "Other file…")) {
+                        pickConfigFile()
+                    }
+                    Button(t("重新加载", "Reload")) {
+                        reload()
+                    }
+                }
+
+                if !loadError.isEmpty {
+                    Text(loadError)
+                        .foregroundStyle(.red)
+                        .font(.callout)
+                } else if entries.isEmpty {
+                    Text(t("没有可导入的 Host。", "No importable hosts."))
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        Button(t("全选", "Select All")) {
+                            selection = Set(entries.map(\.alias))
+                        }
+                        Button(t("全不选", "Select None")) {
+                            selection = []
+                        }
+                        Spacer()
+                        Text("\(selection.count)/\(entries.count)")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+
+                    List(entries, selection: $selection) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.alias)
+                                .font(.headline)
+                            Text("\(entry.user.isEmpty ? t("默认用户", "default user") : entry.user)@\(entry.hostName):\(entry.port)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if !entry.identityFile.isEmpty || !entry.proxyJump.isEmpty {
+                                Text([
+                                    entry.identityFile.isEmpty ? nil : "id: \(entry.identityFile)",
+                                    entry.proxyJump.isEmpty ? nil : "jump: \(entry.proxyJump)"
+                                ].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .tag(entry.alias)
+                    }
+                }
+            }
+            .padding()
+            .frame(width: 560, height: 520)
+            .navigationTitle(t("导入 SSH Config", "Import SSH Config"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel")) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("导入", "Import")) {
+                        let chosen = entries.filter { selection.contains($0.alias) }
+                        onImport(chosen)
+                        dismiss()
+                    }
+                    .disabled(selection.isEmpty)
+                }
+            }
+            .onAppear {
+                reload()
+            }
+        }
+    }
+
+    private func reload() {
+        loadError = ""
+        do {
+            entries = try SSHConfigImporter.loadEntries(from: URL(fileURLWithPath: configPath))
+            selection = Set(entries.map(\.alias))
+        } catch let error as SSHConfigImporterError {
+            entries = []
+            selection = []
+            loadError = error.message(language: preferences.language)
+        } catch {
+            entries = []
+            selection = []
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func pickConfigFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
+        if panel.runModal() == .OK, let path = panel.url?.path {
+            configPath = path
+            reload()
         }
     }
 }

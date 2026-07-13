@@ -152,6 +152,41 @@ final class SSHConnectionStore: ObservableObject {
         return separator.id
     }
 
+    /// Inserts imported SSH hosts at the top. Skips aliases that already exist (by name or host).
+    @discardableResult
+    func importSSHConfigEntries(_ entries: [SSHConfigHostEntry]) -> (added: Int, skipped: Int) {
+        let existingKeys = Set(
+            connections.flatMap { connection -> [String] in
+                guard !connection.isSeparator else { return [] }
+                let name = connection.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let host = connection.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return [name, host].filter { !$0.isEmpty }
+            }
+        )
+
+        var added = 0
+        var skipped = 0
+        var nextOrder = (connections.map(\.manualOrder).min() ?? 0) - 1
+        var batch: [SSHConnection] = []
+
+        for entry in entries {
+            let key = entry.alias.lowercased()
+            let hostKey = entry.hostName.lowercased()
+            if existingKeys.contains(key) || existingKeys.contains(hostKey) {
+                skipped += 1
+                continue
+            }
+            batch.append(entry.makeConnection(manualOrder: nextOrder))
+            nextOrder -= 1
+            added += 1
+        }
+
+        if !batch.isEmpty {
+            connections = batch + connections
+        }
+        return (added, skipped)
+    }
+
     func update(_ connection: SSHConnection) {
         guard let index = connections.firstIndex(where: { $0.id == connection.id }) else { return }
         var updated = connection
