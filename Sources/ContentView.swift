@@ -177,7 +177,7 @@ struct ContentView: View {
                         let deletedID = connection.id
                         store.delete(id: deletedID)
                         if selectedID == deletedID {
-                            selectedID = store.connections.first?.id
+                            selectedID = store.firstSelectableID
                         }
                     },
                     onOpen: openConnection,
@@ -191,7 +191,7 @@ struct ContentView: View {
         }
         .onAppear {
             if selectedID == nil {
-                selectedID = store.connections.first(where: { !$0.isSeparator })?.id
+                selectedID = store.firstSelectableID
             }
         }
         .alert(
@@ -321,14 +321,14 @@ struct ContentView: View {
         }
         store.connections.removeAll { ids.contains($0.id) }
         if let selectedID, ids.contains(selectedID) {
-            self.selectedID = store.connections.first?.id
+            self.selectedID = store.firstSelectableID
         }
     }
 
     private func deleteConnection(id: SSHConnection.ID) {
         store.delete(id: id)
         if selectedID == id {
-            selectedID = store.connections.first(where: { !$0.isSeparator })?.id
+            selectedID = store.firstSelectableID
         }
     }
 

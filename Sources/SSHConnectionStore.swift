@@ -63,15 +63,20 @@ final class SSHConnectionStore: ObservableObject {
         persistenceErrorMessage = nil
     }
 
+    var firstSelectableID: SSHConnection.ID? {
+        connections.first(where: { !$0.isSeparator })?.id
+    }
+
     func addConnection() -> SSHConnection.ID {
-        let nextOrder = (connections.map(\.manualOrder).max() ?? -1) + 1
+        // Smaller manualOrder sorts first; place new items at the top of the list.
+        let nextOrder = (connections.map(\.manualOrder).min() ?? 0) - 1
         let connection = SSHConnection(name: "New Connection", isLocal: false, manualOrder: nextOrder)
         connections.insert(connection, at: 0)
         return connection.id
     }
 
     func addSeparator() -> SSHConnection.ID {
-        let nextOrder = (connections.map(\.manualOrder).max() ?? -1) + 1
+        let nextOrder = (connections.map(\.manualOrder).min() ?? 0) - 1
         let separator = SSHConnection(
             name: "Divider",
             itemKind: .separator,
