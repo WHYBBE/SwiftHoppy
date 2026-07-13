@@ -1443,7 +1443,9 @@ struct SettingsView: View {
     @EnvironmentObject private var store: SSHConnectionStore
     @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var settingsErrorMessage = ""
+    @State private var settingsInfoMessage = ""
     @State private var showClearConfirmation = false
+    @State private var importPreview: ImportPreview?
 
     private func t(_ chinese: String, _ english: String) -> String {
         preferences.text(chinese, english)
@@ -1530,7 +1532,7 @@ struct SettingsView: View {
                                 }
 
                                 Button(t("导入数据", "Import Data")) {
-                                    importConnections()
+                                    pickImportFile()
                                 }
 
                                 Button(t("清空全部数据", "Clear All Data"), role: .destructive) {
@@ -1538,7 +1540,10 @@ struct SettingsView: View {
                                 }
                             }
 
-                            Text(t("导出为 JSON，导入会直接替换当前全部连接记录。", "Exports JSON. Import replaces all current connection records."))
+                            Text(t(
+                                "导出为 JSON。导入前会预览并可选择合并或替换；导入与清空前会自动备份到 Application Support/SwiftHoppy/Backups。",
+                                "Exports JSON. Import shows a preview with merge or replace; import and clear auto-backup to Application Support/SwiftHoppy/Backups."
+                            ))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -1576,18 +1581,45 @@ struct SettingsView: View {
                     : settingsErrorMessage
             )
         }
+        .alert(t("完成", "Done"), isPresented: Binding(
+            get: { !settingsInfoMessage.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    settingsInfoMessage = ""
+                }
+            }
+        )) {
+            Button(t("好", "OK")) {
+                settingsInfoMessage = ""
+            }
+        } message: {
+            Text(settingsInfoMessage)
+        }
+        .sheet(item: $importPreview) { preview in
+            ImportPreviewSheet(
+                preview: preview,
+                existingConnections: store.connections,
+                onCancel: { importPreview = nil },
+                onConfirm: { mode in
+                    confirmImport(preview, mode: mode)
+                }
+            )
+        }
         .confirmationDialog(
             t("确认清空全部数据？", "Clear all data?"),
             isPresented: $showClearConfirmation,
             titleVisibility: .visible
         ) {
             Button(t("清空全部数据", "Clear All Data"), role: .destructive) {
-                store.clearAll()
+                clearAllWithBackup()
             }
             Button(t("取消", "Cancel"), role: .cancel) {
             }
         } message: {
-            Text(t("此操作不可撤销，所有 SSH 连接和系统历史都会被删除。", "This cannot be undone. All SSH connections and system history will be removed."))
+            Text(t(
+                "当前数据会先自动备份，然后删除全部 SSH 连接与系统历史。",
+                "Current data is backed up first, then all SSH connections and system history are removed."
+            ))
         }
     }
 
@@ -1625,7 +1657,7 @@ struct SettingsView: View {
         }
     }
 
-    private func importConnections() {
+    private func pickImportFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -1636,7 +1668,36 @@ struct SettingsView: View {
 
         do {
             let data = try Data(contentsOf: url)
-            try store.importData(from: data)
+            importPreview = try store.previewImport(from: data, sourceFileName: url.lastPathComponent)
+        } catch {
+            settingsErrorMessage = localizedSettingsError(error)
+        }
+    }
+
+    private func confirmImport(_ preview: ImportPreview, mode: ImportMode) {
+        do {
+            let backupURL = try store.applyImport(preview, mode: mode)
+            importPreview = nil
+            var message = mode == .merge
+                ? t("已合并导入连接。", "Connections merged successfully.")
+                : t("已替换全部连接。", "All connections replaced successfully.")
+            if let backupURL {
+                message += "\n" + t("备份：", "Backup: ") + backupURL.lastPathComponent
+            }
+            settingsInfoMessage = message
+        } catch {
+            settingsErrorMessage = localizedSettingsError(error)
+        }
+    }
+
+    private func clearAllWithBackup() {
+        do {
+            let backupURL = try store.clearAllPreservingBackup()
+            var message = t("已清空全部连接数据。", "All connection data cleared.")
+            if let backupURL {
+                message += "\n" + t("备份：", "Backup: ") + backupURL.lastPathComponent
+            }
+            settingsInfoMessage = message
         } catch {
             settingsErrorMessage = localizedSettingsError(error)
         }
@@ -1647,6 +1708,104 @@ struct SettingsView: View {
             return storeError.message(language: preferences.language)
         }
         return error.localizedDescription
+    }
+}
+
+struct ImportPreviewSheet: View {
+    @EnvironmentObject private var preferences: AppPreferencesStore
+    let preview: ImportPreview
+    let existingConnections: [SSHConnection]
+    let onCancel: () -> Void
+    let onConfirm: (ImportMode) -> Void
+    @State private var mode: ImportMode = .merge
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        preferences.text(chinese, english)
+    }
+
+    private var newCount: Int {
+        preview.newCount(against: existingConnections)
+    }
+
+    private var duplicateCount: Int {
+        preview.duplicateCount(against: existingConnections)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(preview.sourceFileName)
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(t("当前记录", "Current records")): \(existingConnections.count)")
+                    Text("\(t("文件条目", "Items in file")): \(preview.importedCount) (\(preview.connectionCount) \(t("连接", "connections")), \(preview.separatorCount) \(t("分割线", "dividers")))")
+                    Text("\(t("可新增", "Would add")): \(newCount) · \(t("重复 ID", "Duplicate IDs")): \(duplicateCount)")
+                }
+                .font(.callout)
+
+                Picker(t("导入方式", "Import mode"), selection: $mode) {
+                    Text(t("合并（仅添加新 ID）", "Merge (add new IDs only)")).tag(ImportMode.merge)
+                    Text(t("替换全部", "Replace all")).tag(ImportMode.replace)
+                }
+                .pickerStyle(.radioGroup)
+
+                if mode == .replace {
+                    Text(t(
+                        "替换会覆盖当前全部连接；操作前会自动备份。",
+                        "Replace overwrites all current connections; a backup is created first."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                } else {
+                    Text(t(
+                        "合并会保留现有连接，只追加文件中尚未存在的 ID；操作前会自动备份。",
+                        "Merge keeps existing connections and appends only IDs not already present; a backup is created first."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
+                List {
+                    ForEach(preview.items.prefix(30)) { item in
+                        HStack {
+                            Image(systemName: item.isSeparator ? "line.3.horizontal" : "server.rack")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.isSeparator ? t("分割线", "Divider") : (item.displayName.isEmpty ? item.host : item.displayName))
+                                    .lineLimit(1)
+                                if !item.isSeparator {
+                                    Text(item.isLocal ? t("本机", "Local") : "\(item.host):\(item.port)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                    if preview.items.count > 30 {
+                        Text(t("仅显示前 30 条…", "Showing first 30 items…"))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(minHeight: 220)
+            }
+            .padding()
+            .frame(width: 520, height: 520)
+            .navigationTitle(t("导入预览", "Import Preview"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("取消", "Cancel"), action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(mode == .replace ? t("替换", "Replace") : t("合并", "Merge")) {
+                        onConfirm(mode)
+                    }
+                    .disabled(mode == .merge && newCount == 0 && preview.importedCount > 0 && duplicateCount == preview.importedCount)
+                }
+            }
+        }
     }
 }
 
